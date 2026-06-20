@@ -55,6 +55,8 @@ class FaceOverlayView @JvmOverloads constructor(
     private var dragStartRect: RectF? = null
     private enum class Handle { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT, MOVE }
     private var drawingEnabled = true
+    var onBoxAdjustFinished: (() -> Unit)? = null
+
 
     // ---------- Public API ----------
 
@@ -216,6 +218,7 @@ class FaceOverlayView @JvmOverloads constructor(
                     activeBoxIndex = -1
                     dragStartBitmapPoint = null
                     dragStartRect = null
+                    onBoxAdjustFinished?.invoke()
                     return true
                 }
                 // Plain tap (no drag happened) -> toggle selection
@@ -280,5 +283,22 @@ class FaceOverlayView @JvmOverloads constructor(
     fun isTouchOnHandleOrSelectedBox(x: Float, y: Float): Boolean {
         if (!drawingEnabled) return false
         return findHandleOrBox(x, y) != null
+    }
+    fun setFacesFromRects(rects: List<RectF>, bitmapWidth: Int, bitmapHeight: Int) {
+        bitmapW = bitmapWidth.toFloat()
+        bitmapH = bitmapHeight.toFloat()
+        // Preserve existing originalRect references where possible; for simplicity, treat current as both
+        boxes = rects.mapIndexed { i, r ->
+            val existing = boxes.getOrNull(i)
+            FaceBox(rect = RectF(r), originalRect = existing?.originalRect ?: RectF(r))
+        }.toMutableList()
+        invalidate()
+    }
+
+    // New method — syncs selection state from ViewModel without re-triggering callbacks
+    fun syncSelection(selected: Set<Int>) {
+        selectedFaces.clear()
+        selectedFaces.addAll(selected)
+        invalidate()
     }
 }
