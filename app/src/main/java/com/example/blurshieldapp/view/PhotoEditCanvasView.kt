@@ -9,6 +9,7 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.widget.FrameLayout
 import android.widget.ImageView
+import com.example.blurshieldapp.ui.edit.EditViewModel
 
 class PhotoEditCanvasView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null
@@ -85,13 +86,34 @@ class PhotoEditCanvasView @JvmOverloads constructor(
     // Public API
     // ────────────────────────────────────────────────────────────────────────────
 
+    //for home fragment
     fun setImageBitmap(bmp: Bitmap) {
         bitmap = bmp
         brushLayersReady = false
         imageView.setImageBitmap(bmp)
         post {
             resetMatrixToFit()
+            // Initialize with default empty layer setups
             brushView.initLayers(bmp.width, bmp.height, null, null)
+            brushLayersReady = true
+        }
+    }
+    //for edit fragment
+    fun setImageBitmap(bmp: Bitmap, viewModel: EditViewModel) {
+        bitmap = bmp
+        brushLayersReady = false
+        imageView.setImageBitmap(bmp)
+        post {
+            resetMatrixToFit()
+
+            // Initialize layers
+            brushView.initLayers(bmp.width, bmp.height, null, null)
+
+            // Link up the callback lambda with the correct types
+            brushView.onMaskStrokeFinished = { mask: Bitmap, pathPoints: List<android.graphics.PointF> ->
+                viewModel.onMaskStrokeFinished(mask, pathPoints)
+            }
+
             brushLayersReady = true
         }
     }
@@ -105,17 +127,11 @@ class PhotoEditCanvasView @JvmOverloads constructor(
     }
 
     fun getLiveMask(): Bitmap? = brushView.getMaskBitmap()
-    fun getLiveEmojiStamp(): Bitmap? = brushView.getEmojiStampBitmap()
-
     fun updateImagePreservingMatrix(bmp: Bitmap) {
         bitmap = bmp
         imageView.setImageBitmap(bmp)
         imageView.imageMatrix = matrix
     }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // Matrix / layout
-    // ────────────────────────────────────────────────────────────────────────────
 
     private fun resetMatrixToFit() {
         val bmp = bitmap ?: return

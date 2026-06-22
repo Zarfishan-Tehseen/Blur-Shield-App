@@ -14,8 +14,6 @@ class BrushMaskView @JvmOverloads constructor(
 ) : View(context, attrs) {
     private var maskBitmap: Bitmap? = null
     private var maskCanvas: Canvas? = null
-    private var emojiStampBitmap: Bitmap? = null
-    private var emojiStampCanvas: Canvas? = null
 
     private var bitmapW = 0
     private var bitmapH = 0
@@ -46,13 +44,13 @@ class BrushMaskView @JvmOverloads constructor(
         colorFilter = PorterDuffColorFilter(Color.argb(90, 0, 0, 0), PorterDuff.Mode.SRC_IN)
     }
 
-    var onMaskStrokeFinished: ((Bitmap) -> Unit)? = null
-    var onEmojiStrokeFinished: ((Bitmap) -> Unit)? = null
+    // Single unified callback passing BOTH the stencil mask and the path coordinates
+    var onMaskStrokeFinished: ((Bitmap, List<PointF>) -> Unit)? = null
 
     private var lastX = 0f
     private var lastY = 0f
-    private var lastStampX = 0f
-    private var lastStampY = 0f
+
+    private val currentStrokePoints = mutableListOf<PointF>()
 
     fun initLayers(width: Int, height: Int, existingMask: Bitmap?, existingStamp: Bitmap?) {
         bitmapW = width
@@ -61,10 +59,6 @@ class BrushMaskView @JvmOverloads constructor(
         maskBitmap = existingMask?.copy(Bitmap.Config.ARGB_8888, true)
             ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         maskCanvas = Canvas(maskBitmap!!)
-
-        emojiStampBitmap = existingStamp?.copy(Bitmap.Config.ARGB_8888, true)
-            ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        emojiStampCanvas = Canvas(emojiStampBitmap!!)
 
         isInitialized = true
         invalidate()
@@ -77,24 +71,10 @@ class BrushMaskView @JvmOverloads constructor(
             Canvas(dest).drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
             restoredMask?.let { src -> Canvas(dest).drawBitmap(src, 0f, 0f, null) }
         }
-
-        emojiStampBitmap?.let { dest ->
-            Canvas(dest).drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-            restoredStamp?.let { src -> Canvas(dest).drawBitmap(src, 0f, 0f, null) }
-        }
         invalidate()
     }
 
     fun getMaskBitmap(): Bitmap? = maskBitmap
-    fun getEmojiStampBitmap(): Bitmap? = emojiStampBitmap
-
-    fun clearAll() {
-        maskBitmap?.eraseColor(Color.TRANSPARENT)
-        emojiStampBitmap?.eraseColor(Color.TRANSPARENT)
-        invalidate()
-        maskBitmap?.let { onMaskStrokeFinished?.invoke(it) }
-        emojiStampBitmap?.let { onEmojiStrokeFinished?.invoke(it) }
-    }
 
     fun updateTransform(matrix: Matrix) {
         transformMatrix = Matrix(matrix)
@@ -106,10 +86,12 @@ class BrushMaskView @JvmOverloads constructor(
         super.onDraw(canvas)
         canvas.save()
         canvas.concat(transformMatrix)
+
+        // Show the mask preview stencil on screen unless we are using the emoji tool
         if (currentEffect != FaceEffect.EMOJI) {
             maskBitmap?.let { canvas.drawBitmap(it, 0f, 0f, maskPreviewPaint) }
         }
-        emojiStampBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
+
         canvas.restore()
     }
 
@@ -121,13 +103,18 @@ class BrushMaskView @JvmOverloads constructor(
                 isDrawing = true
                 lastX = pt.x; lastY = pt.y
 
-                // ALWAYS draw into the generic mask stencil layer, even for Emojis!
+                currentStrokePoints.clear()
+                currentStrokePoints.add(PointF(pt.x, pt.y))
+
                 drawMaskPointOrLine(pt.x, pt.y, isDown = true)
                 invalidate()
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!isDrawing) return false
+
+                currentStrokePoints.add(PointF(pt.x, pt.y))
+
                 drawMaskPointOrLine(pt.x, pt.y, isDown = false)
                 lastX = pt.x; lastY = pt.y
                 invalidate()
@@ -136,13 +123,20 @@ class BrushMaskView @JvmOverloads constructor(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (isDrawing) {
                     isDrawing = false
-                    maskBitmap?.let { bmp -> onMaskStrokeFinished?.invoke(bmp.copy(bmp.config, true)) }
+                    maskBitmap?.let { bmp ->
+                        // Safely pass data copies upwards to the handlers
+                        onMaskStrokeFinished?.invoke(
+                            bmp.copy(bmp.config, true),
+                            currentStrokePoints.toList()
+                        )
+                    }
                 }
                 return true
             }
         }
         return false
     }
+
     private fun drawMaskPointOrLine(x: Float, y: Float, isDown: Boolean) {
         val mc = maskCanvas ?: return
         maskPaint.strokeWidth = brushRadiusBitmapPx * 2f
@@ -157,47 +151,6 @@ class BrushMaskView @JvmOverloads constructor(
         } else {
             mc.drawLine(lastX, lastY, x, y, maskPaint)
         }
-    }
-
-    private fun paintEmojiTrail(x: Float, y: Float, isFirstPoint: Boolean) {
-        val ec = emojiStampCanvas ?: return
-
-        if (currentTool == BrushTool.ERASE) {
-            maskPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
-            maskPaint.style = Paint.Style.FILL
-            ec.drawCircle(x, y, brushRadiusBitmapPx, maskPaint)
-            return
-        }
-
-        if (isFirstPoint) {
-            stampEmoji(ec, x, y)
-            return
-        }
-
-        val spacing = brushRadiusBitmapPx * 0.8f
-        val dx = x - lastStampX
-        val dy = y - lastStampY
-        val distance = kotlin.math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
-
-        if (distance >= spacing) {
-            val steps = (distance / spacing).toInt()
-            for (i in 1..steps) {
-                val t = (spacing * i) / distance
-                stampEmoji(ec, lastStampX + dx * t, lastStampY + dy * t)
-            }
-            lastStampX = x; lastStampY = y
-        }
-    }
-
-    private fun stampEmoji(canvas: Canvas, x: Float, y: Float) {
-        val size = brushRadiusBitmapPx * 2f
-        val paint = Paint().apply {
-            textSize = size
-            textAlign = Paint.Align.CENTER
-            isAntiAlias = true
-        }
-        val fm = paint.fontMetrics
-        canvas.drawText(currentEmoji, x, y - (fm.ascent + fm.descent) / 2f, paint)
     }
 
     private fun screenPointToBitmap(x: Float, y: Float): PointF {

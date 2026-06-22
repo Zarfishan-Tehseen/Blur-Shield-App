@@ -34,15 +34,10 @@ class EditFragment : Fragment() {
 
     private val args: EditFragmentArgs by navArgs()
     private val viewModel: EditViewModel by navGraphViewModels(R.id.nav_graph)
-
-    // ── Track the last undo/redo mask references so we know when a snapshot
-    //    restore has brought in different bitmaps (vs. a live brush stroke that
-    //    is already reflected in BrushMaskView).
+    //track undo/redo
     private var lastRestoredMask: Bitmap? = null
-    private var lastRestoredStamp: Bitmap? = null
 
     // ── True once we have called setImageBitmap for the current URI.
-    //    Prevents re-initing brush layers on every state emission.
     private var canvasImageSet = false
 
     override fun onCreateView(
@@ -66,24 +61,18 @@ class EditFragment : Fragment() {
 
         if (isNewImage) {
             val bitmap = viewModel.uiState.value.originalBitmap!!
-            // setImageBitmap resets the canvas AND initialises brush layers internally
-            binding.editCanvas.setImageBitmap(bitmap)
+            // Update to pass the viewModel into layout initialization blocks
+            binding.editCanvas.setImageBitmap(bitmap, viewModel)
             canvasImageSet = true
             detectFaces(bitmap)
         } else {
-            // Returning to the fragment (e.g. back-stack pop) — image already loaded.
-            // We must re-set the bitmap on the view (view was destroyed) and restore
-            // whatever brush state the ViewModel holds.
             val state = viewModel.uiState.value
             state.originalBitmap?.let { bmp ->
-                binding.editCanvas.setImageBitmap(bmp)
+                binding.editCanvas.setImageBitmap(bmp, viewModel)
                 canvasImageSet = true
-                // After the post{} inside setImageBitmap completes the layers will be
-                // initialised empty; then restoreBrushLayers fills them with the snapshot.
                 binding.editCanvas.post {
-                    binding.editCanvas.restoreBrushLayers(state.maskBitmap, state.emojiStampBitmap)
-                    lastRestoredMask  = state.maskBitmap
-                    lastRestoredStamp = state.emojiStampBitmap
+                    binding.editCanvas.restoreBrushLayers(state.maskBitmap, null)
+                    lastRestoredMask = state.maskBitmap
                 }
             }
         }
@@ -91,11 +80,6 @@ class EditFragment : Fragment() {
         setupListeners()
         observeState()
     }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // Face detection
-    // ────────────────────────────────────────────────────────────────────────────
-
     private fun detectFaces(bitmap: Bitmap) {
         val options = FaceDetectorOptions.Builder()
             .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE)
@@ -105,11 +89,6 @@ class EditFragment : Fragment() {
             .process(InputImage.fromBitmap(bitmap, 0))
             .addOnSuccessListener { faces -> viewModel.setDetectedFaces(faces) }
     }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // Listeners
-    // ────────────────────────────────────────────────────────────────────────────
-
     private fun setupListeners() {
         // Effect toggle
         binding.toggleEffect.addOnButtonCheckedListener { _, checkedId, isChecked ->
@@ -176,15 +155,10 @@ class EditFragment : Fragment() {
 
         binding.btnBrushClear.setOnClickListener { viewModel.clearBrushLayers() }
 
-        // Stroke-finished callbacks: ViewModel records snapshot for undo; we also
-        // update our "last restored" trackers so render() doesn't re-push them back.
-        binding.editCanvas.brushView.onMaskStrokeFinished = { mask ->
-            lastRestoredMask = mask        // mark as "already in view"
-            viewModel.onMaskStrokeFinished(mask)
-        }
-        binding.editCanvas.brushView.onEmojiStrokeFinished = { stamp ->
-            lastRestoredStamp = stamp
-            viewModel.onEmojiStrokeFinished(stamp)
+        // Linked structural callbacks are initialized directly within the view layout now
+        binding.editCanvas.brushView.onMaskStrokeFinished = { mask, pathPoints ->
+            lastRestoredMask = mask
+            viewModel.onMaskStrokeFinished(mask, pathPoints)
         }
 
         // Save / export
@@ -194,10 +168,6 @@ class EditFragment : Fragment() {
         }
     }
 
-    // ────────────────────────────────────────────────────────────────────────────
-    // State observation
-    // ────────────────────────────────────────────────────────────────────────────
-
     private fun observeState() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -205,10 +175,6 @@ class EditFragment : Fragment() {
             }
         }
     }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // Render
-    // ────────────────────────────────────────────────────────────────────────────
 
     private fun render(state: EditUiState) {
         val bmp = state.originalBitmap ?: return
@@ -234,7 +200,7 @@ class EditFragment : Fragment() {
         binding.btnUndo.alpha = if (state.canUndo) 1f else 0.4f
         binding.btnRedo.alpha = if (state.canRedo) 1f else 0.4f
 
-        // ── Brush config (just sync knobs — never re-init layers here) ──
+        // ── Brush config sync ──
         binding.editCanvas.setBrushEnabled(state.isBrushEnabled)
         binding.brushControlsRow.isVisible = state.isBrushEnabled
         binding.btnBrushMode.alpha = if (state.isBrushEnabled) 1f else 0.7f
@@ -245,38 +211,22 @@ class EditFragment : Fragment() {
         if (binding.sliderBrushSize.value != state.brushRadius) binding.sliderBrushSize.value = state.brushRadius
 
         // ── Undo/redo restore detection ──
-        // If the ViewModel's snapshot bitmaps differ from what we last painted
-        // (i.e. user hit Undo/Redo), push the restored content into BrushMaskView
-        // without replacing its Canvas object.
-        val snapMask  = state.maskBitmap
-        val snapStamp = state.emojiStampBitmap
-        if (snapMask !== lastRestoredMask || snapStamp !== lastRestoredStamp) {
-            lastRestoredMask  = snapMask
-            lastRestoredStamp = snapStamp
-            binding.editCanvas.restoreBrushLayers(snapMask, snapStamp)
+        val snapMask = state.maskBitmap
+        if (snapMask !== lastRestoredMask) {
+            lastRestoredMask = snapMask
+            binding.editCanvas.restoreBrushLayers(snapMask, null)
         }
 
         // ── Composite preview ──
-        // Read the LIVE bitmaps from BrushMaskView (always up-to-date, even mid-stroke)
-        val liveMask  = binding.editCanvas.getLiveMask()
-        val liveStamp = binding.editCanvas.getLiveEmojiStamp()
-        val finalBmp  = compositeForPreview(bmp, state, liveMask, liveStamp)
+        val liveMask = binding.editCanvas.getLiveMask()
+        val finalBmp = compositeForPreview(bmp, state, liveMask)
         binding.editCanvas.updateImagePreservingMatrix(finalBmp)
     }
 
-    // ────────────────────────────────────────────────────────────────────────────
-    // Compositing
-    // ────────────────────────────────────────────────────────────────────────────
-
-    /**
-     * Live preview composite — uses the live mask from BrushMaskView so the
-     * preview always reflects the current brush stroke.
-     */
     private fun compositeForPreview(
         bmp: Bitmap,
         state: EditUiState,
-        liveMask: Bitmap?,
-        liveStamp: Bitmap?
+        liveMask: Bitmap?
     ): Bitmap {
         val withFaces = if (state.selectedFaces.isEmpty()) {
             bmp
@@ -288,32 +238,27 @@ class EditFragment : Fragment() {
             )
         }
 
-        // High performance optimization bypass branch:
-        // If drawing is true, completely avoid expensive pixel filters on the main thread
+        // Throttling layer: Skip heavy operations while actively tracking touch paths
         if (binding.editCanvas.brushView.isDrawing) {
             return withFaces
         }
 
-        val withBrush = ImageProcessor.applyBrushMaskEffect(
-            context   = requireContext(),
-            base      = withFaces,
-            mask      = liveMask,
-            effect    = state.effect,
-            intensity = state.intensity,
-            emoji     = state.selectedEmoji,
-            brushRadius = state.brushRadius
+        return ImageProcessor.applyBrushMaskEffect(
+            context     = requireContext(),
+            base        = withFaces,
+            mask        = liveMask,
+            effect      = state.effect,
+            intensity   = state.intensity,
+            emoji       = state.selectedEmoji,
+            brushRadius = state.brushRadius,
+            strokePaths = state.strokePaths
         )
-        return ImageProcessor.applyBrushEmojiStamp(withBrush, liveStamp)
-    }
-    private fun compositeImage(bmp: Bitmap, state: EditUiState): Bitmap {
-        val liveMask  = binding.editCanvas.getLiveMask()
-        val liveStamp = binding.editCanvas.getLiveEmojiStamp()
-        return compositeForPreview(bmp, state, liveMask, liveStamp)
     }
 
-    // ────────────────────────────────────────────────────────────────────────────
-    // Chips
-    // ────────────────────────────────────────────────────────────────────────────
+    private fun compositeImage(bmp: Bitmap, state: EditUiState): Bitmap {
+        val liveMask = binding.editCanvas.getLiveMask()
+        return compositeForPreview(bmp, state, liveMask)
+    }
 
     private fun buildChips(count: Int) {
         binding.chipGroupFaces.removeAllViews()

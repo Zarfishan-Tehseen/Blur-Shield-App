@@ -105,54 +105,65 @@ object ImageProcessor {
         effect: FaceEffect,
         intensity: Float,
         emoji: String = "😀",
-        brushRadius: Float = 60f
+        brushRadius: Float = 60f,
+        strokePaths: List<List<PointF>> = emptyList() // Added vector paths here
     ): Bitmap {
         if (mask == null || isMaskEmpty(mask)) return base
         val softBase = base.toSoftware()
 
-        // ── CASE 1: Dynamic Emoji Shader (No Lagging Loops!) ──
+        // ── CASE 1: Dynamic Vector Line Path Trail for Emojis ──
         if (effect == FaceEffect.EMOJI) {
             val result = softBase.copy(Bitmap.Config.ARGB_8888, true)
             val canvas = Canvas(result)
 
-            // 1. Create a tiny single square tile containing just one emoji
-            val tileSize = (brushRadius * 2f).coerceAtLeast(20f).toInt()
-            val tileBitmap = Bitmap.createBitmap(tileSize, tileSize, Bitmap.Config.ARGB_8888)
-            val tileCanvas = Canvas(tileBitmap)
-
-            val textPaint = Paint().apply {
-                textSize = tileSize * 0.8f
+            val size = brushRadius * 2f
+            val paint = Paint().apply {
+                textSize = size
                 textAlign = Paint.Align.CENTER
                 isAntiAlias = true
             }
-            val fm = textPaint.fontMetrics
+            val fm = paint.fontMetrics
             val yOffset = -(fm.ascent + fm.descent) / 2f
-            tileCanvas.drawText(emoji, tileSize / 2f, tileSize / 2f + yOffset, textPaint)
 
-            // 2. Prepare an intermediate layer to blend our repeating pattern with the mask
-            val intermediateLayer = Bitmap.createBitmap(softBase.width, softBase.height, Bitmap.Config.ARGB_8888)
-            val layerCanvas = Canvas(intermediateLayer)
+            // Define spacing intervals between emojis along the stroke path line
+            val spacing = brushRadius * 0.8f
 
-            // Draw the user's generic brush path stencil first
-            layerCanvas.drawBitmap(mask, 0f, 0f, null)
+            // Loop through each separate brush stroke path drawn by the user
+            for (pathPoints in strokePaths) {
+                if (pathPoints.isEmpty()) continue
 
-            // Fill the path with our repeating emoji tile pattern using SRC_IN
-            val patternPaint = Paint().apply {
-                shader = BitmapShader(tileBitmap, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
-                xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+                // Draw the very first starting point of the stroke trail
+                var lastRecordedX = pathPoints[0].x
+                var lastRecordedY = pathPoints[0].y
+                canvas.drawText(emoji, lastRecordedX, lastRecordedY + yOffset, paint)
+
+                // Interpolate points along the remaining coordinates of the stroke
+                for (i in 1 until pathPoints.size) {
+                    val targetX = pathPoints[i].x
+                    val targetY = pathPoints[i].y
+
+                    val dx = targetX - lastRecordedX
+                    val dy = targetY - lastRecordedY
+                    val distance = kotlin.math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
+
+                    if (distance >= spacing) {
+                        val steps = (distance / spacing).toInt()
+                        for (j in 1..steps) {
+                            val t = (spacing * j) / distance
+                            val interpX = lastRecordedX + dx * t
+                            val interpY = lastRecordedY + dy * t
+                            canvas.drawText(emoji, interpX, interpY + yOffset, paint)
+                        }
+                        lastRecordedX = targetX
+                        lastRecordedY = targetY
+                    }
+                }
             }
-            layerCanvas.drawRect(0f, 0f, softBase.width.toFloat(), softBase.height.toFloat(), patternPaint)
-
-            // 3. Composite the patterned stroke directly onto the photo
-            canvas.drawBitmap(intermediateLayer, 0f, 0f, null)
-
-            // Memory cleanup
-            tileBitmap.recycle()
-            intermediateLayer.recycle()
             return result
         }
 
         // ── CASE 2: Normal Filters (Blur, Pixelate, Blackout) ──
+        // Your working logic stays entirely untouched here!
         val fullyProcessed: Bitmap = when (effect) {
             FaceEffect.BLUR -> blurBitmap(context, softBase.copy(Bitmap.Config.ARGB_8888, true), intensity.coerceIn(1f, 25f))
             FaceEffect.PIXELATE -> pixelateBitmap(softBase.copy(Bitmap.Config.ARGB_8888, true), intensity.toInt().coerceAtLeast(2))

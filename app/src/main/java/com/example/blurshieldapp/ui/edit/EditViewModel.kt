@@ -1,6 +1,7 @@
 package com.example.blurshieldapp.ui.edit
 
 import android.graphics.Bitmap
+import android.graphics.PointF
 import android.graphics.RectF
 import android.os.Build
 import androidx.lifecycle.ViewModel
@@ -17,11 +18,14 @@ class EditViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(EditUiState())
     val uiState: StateFlow<EditUiState> = _uiState.asStateFlow()
+
     private val undoStack = ArrayDeque<EditSnapshot>()
     private val redoStack = ArrayDeque<EditSnapshot>()
     private val maxStackSize = 20
+
     private var detectedFaces: List<Face> = emptyList()
     private var currentImageUri: String? = null
+
     private val _exportBitmap = MutableStateFlow<Bitmap?>(null)
     val exportBitmap: StateFlow<Bitmap?> = _exportBitmap.asStateFlow()
 
@@ -58,7 +62,7 @@ class EditViewModel : ViewModel() {
         pushSnapshot(recordHistory = false)
     }
 
-    // ---------- Face-box actions ----------
+    // Face-box actions
 
     fun onFaceSelected(index: Int, selected: Boolean) {
         _uiState.update { state ->
@@ -113,21 +117,20 @@ class EditViewModel : ViewModel() {
         _uiState.update { it.copy(brushRadius = radius) }
     }
 
-    fun onMaskStrokeFinished(mask: Bitmap) {
-        // Keep an isolated copy inside UI State to decouple it from view mutations
+    // Unified Callback: Manages both image masks and live vector trails seamlessly
+    fun onMaskStrokeFinished(mask: Bitmap, newPath: List<PointF>) {
         val secureCopy = mask.copy(mask.config ?: Bitmap.Config.ARGB_8888, true)
-        _uiState.update { it.copy(maskBitmap = secureCopy) }
-        pushSnapshot()
-    }
-
-    fun onEmojiStrokeFinished(stamp: Bitmap) {
-        val secureCopy = stamp.copy(stamp.config ?: Bitmap.Config.ARGB_8888, true)
-        _uiState.update { it.copy(emojiStampBitmap = secureCopy) }
+        _uiState.update { state ->
+            val updatedPaths = state.strokePaths.toMutableList().apply {
+                add(newPath)
+            }
+            state.copy(maskBitmap = secureCopy, strokePaths = updatedPaths)
+        }
         pushSnapshot()
     }
 
     fun clearBrushLayers() {
-        _uiState.update { it.copy(maskBitmap = null, emojiStampBitmap = null) }
+        _uiState.update { it.copy(maskBitmap = null, strokePaths = emptyList()) }
         pushSnapshot()
     }
 
@@ -145,7 +148,7 @@ class EditViewModel : ViewModel() {
             intensity = state.intensity,
             selectedEmoji = state.selectedEmoji,
             maskBitmap = state.maskBitmap,
-            emojiStampBitmap = state.emojiStampBitmap
+            strokePaths = state.strokePaths
         ).copySafe()
 
         if (recordHistory) {
@@ -184,15 +187,17 @@ class EditViewModel : ViewModel() {
                 intensity = snapshot.intensity,
                 selectedEmoji = snapshot.selectedEmoji,
                 maskBitmap = snapshot.maskBitmap,
-                emojiStampBitmap = snapshot.emojiStampBitmap
+                strokePaths = snapshot.strokePaths.map { stroke -> stroke.map { PointF(it.x, it.y) } }
             )
         }
     }
+
     private fun updateUndoRedoFlags() {
         _uiState.update {
             it.copy(canUndo = undoStack.size > 1, canRedo = redoStack.isNotEmpty())
         }
     }
+
     fun prepareExport(compositor: (Bitmap, EditUiState) -> Bitmap) {
         val state = _uiState.value
         val base = state.originalBitmap ?: return
