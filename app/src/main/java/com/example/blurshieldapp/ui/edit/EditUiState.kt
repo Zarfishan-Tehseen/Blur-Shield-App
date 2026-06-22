@@ -3,6 +3,7 @@ package com.example.blurshieldapp.ui.edit
 import android.graphics.Bitmap
 import android.graphics.RectF
 import com.example.blurshieldapp.utils.FaceEffect
+import com.example.blurshieldapp.view.BrushTool
 
 data class EditUiState(
     val originalBitmap: Bitmap? = null,
@@ -13,7 +14,11 @@ data class EditUiState(
     val intensity: Float = 15f,
     val selectedEmoji: String = "😀",
     val maskBitmap: Bitmap? = null,
+    val emojiStampBitmap: Bitmap? = null,
     val isPreviewMode: Boolean = false,
+    val isBrushEnabled: Boolean = false,
+    val brushTool: BrushTool = BrushTool.PAINT,
+    val brushRadius: Float = 60f,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     val isLoading: Boolean = false
