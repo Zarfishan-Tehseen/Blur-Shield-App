@@ -38,6 +38,13 @@ class HomeFragment : Fragment() {
         binding.btnDetect.isEnabled = true
         faceCount = 0
     }
+    private val pickVideo = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri ?: return@registerForActivityResult
+        findNavController().navigate(
+            R.id.videoEditFragment,
+            Bundle().apply { putString("videoUri", uri.toString()) }
+        )
+    }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _binding = FragmentHomeBinding.inflate(inflater, container, false)
@@ -49,6 +56,9 @@ class HomeFragment : Fragment() {
 
         binding.btnPickImage.setOnClickListener {
             pickImage.launch("image/*")
+        }
+        binding.btnPickVideo.setOnClickListener {
+            pickVideo.launch("video/*")
         }
 
         binding.btnDetect.setOnClickListener {

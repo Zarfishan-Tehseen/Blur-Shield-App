@@ -29,15 +29,15 @@ class PhotoEditCanvasView @JvmOverloads constructor(
     private var isBrushEnabled = false
     private var brushLayersReady = false
 
-    // ── Pan state ──
+    // Pan state
     private var panPointerId = -1
     private var lastPanX = 0f
     private var lastPanY = 0f
 
-    // ── Scale state ──
+    // Scale state
     private var isScaling = false
 
-    // ── Tracks whether we've committed this touch sequence to a specific handler ──
+    // Tracks whether we've committed this touch sequence to a specific handler
     private enum class TouchOwner { NONE, OVERLAY, CANVAS }
     private var touchOwner = TouchOwner.NONE
 
@@ -61,11 +61,14 @@ class PhotoEditCanvasView @JvmOverloads constructor(
         scaleDetector = ScaleGestureDetector(context,
             object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
                 override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-                    isScaling = true
-                    if (isBrushEnabled) {
-                        brushView.handlePaintTouch(0f, 0f, MotionEvent.ACTION_CANCEL)
+                    // CRITICAL FIX: Only allow scaling if there are actually 2 or more fingers on the screen
+                    // This stops single-finger brush strokes from accidentally triggering a zoom cancel!
+                    return if (touchOwner == TouchOwner.CANVAS && !isBrushEnabled) {
+                        isScaling = true
+                        true
+                    } else {
+                        false
                     }
-                    return true
                 }
                 override fun onScale(detector: ScaleGestureDetector): Boolean {
                     val newScale = (currentScale * detector.scaleFactor).coerceIn(minScale, maxScale)
@@ -81,10 +84,6 @@ class PhotoEditCanvasView @JvmOverloads constructor(
                 }
             })
     }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // Public API
-    // ────────────────────────────────────────────────────────────────────────────
 
     //for home fragment
     fun setImageBitmap(bmp: Bitmap) {
@@ -181,10 +180,6 @@ class PhotoEditCanvasView @JvmOverloads constructor(
         matrix.postTranslate(dx, dy)
     }
 
-    // ────────────────────────────────────────────────────────────────────────────
-    // Touch interception — decide ONCE on ACTION_DOWN who owns this gesture
-    // ────────────────────────────────────────────────────────────────────────────
-
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
         if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
             touchOwner = TouchOwner.NONE
@@ -212,12 +207,25 @@ class PhotoEditCanvasView @JvmOverloads constructor(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        return if (isBrushEnabled) handleBrushTouch(event) else handleNormalTouch(event)
+        if (isBrushEnabled) {
+            // CRITICAL FIX: Tell the Parent ScrollView/Layout not to steal touches while drawing!
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            return handleBrushTouch(event)
+        } else {
+            // Also prevent scrolling while actively zooming/panning the image canvas
+            if (event.pointerCount > 1 || isScaling) {
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            return handleNormalTouch(event)
+        }
     }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // Normal mode touch handling
-    // ────────────────────────────────────────────────────────────────────────────
 
     private fun handleNormalTouch(event: MotionEvent): Boolean {
         scaleDetector.onTouchEvent(event)
@@ -263,7 +271,7 @@ class PhotoEditCanvasView @JvmOverloads constructor(
                 if (event.pointerCount <= 2) isScaling = false
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                overlayView.dispatchTouchEvent(event)  // ← single dispatch on UP
+                overlayView.dispatchTouchEvent(event)
                 panPointerId = -1
                 isScaling = false
                 touchOwner = TouchOwner.NONE
@@ -271,32 +279,32 @@ class PhotoEditCanvasView @JvmOverloads constructor(
         }
         return true
     }
-    // ────────────────────────────────────────────────────────────────────────────
-    // Brush mode touch handling
-    // ────────────────────────────────────────────────────────────────────────────
-
     private fun handleBrushTouch(event: MotionEvent): Boolean {
-        scaleDetector.onTouchEvent(event)
+        // Only pass to scale detector if there is more than 1 finger down
+        if (event.pointerCount > 1) {
+            scaleDetector.onTouchEvent(event)
+        }
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                panPointerId = -1  // -1 means brush is active
+                panPointerId = -1  // -1 explicitly marks an active brush stroke
                 brushView.handlePaintTouch(event.x, event.y, MotionEvent.ACTION_DOWN)
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                // Second finger arrived — cancel brush, switch to pan
+                // A second finger arrived: cleanly cancel the brush stroke and transition to pan/zoom
                 brushView.handlePaintTouch(0f, 0f, MotionEvent.ACTION_CANCEL)
-                panPointerId = event.getPointerId(0)
-                lastPanX = event.getX(0)
-                lastPanY = event.getY(0)
+                panPointerId = event.getPointerId(event.actionIndex)
+                lastPanX = event.getX(event.actionIndex)
+                lastPanY = event.getY(event.actionIndex)
             }
             MotionEvent.ACTION_MOVE -> {
                 if (isScaling) return true
+
                 if (event.pointerCount == 1 && panPointerId == -1) {
-                    // Single finger — brush stroke
+                    // Single finger tracking: draw smoothly
                     brushView.handlePaintTouch(event.x, event.y, MotionEvent.ACTION_MOVE)
                 } else if (event.pointerCount >= 2 && panPointerId != -1) {
-                    // Multi finger — pan
+                    // Multi-finger tracking: pan the canvas around safely
                     val idx = event.findPointerIndex(panPointerId)
                     if (idx != -1) {
                         val dx = event.getX(idx) - lastPanX
@@ -322,7 +330,6 @@ class PhotoEditCanvasView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (panPointerId == -1) {
-                    // Was a brush stroke — notify finish
                     brushView.handlePaintTouch(event.x, event.y, event.actionMasked)
                 }
                 panPointerId = -1
@@ -331,5 +338,4 @@ class PhotoEditCanvasView @JvmOverloads constructor(
             }
         }
         return true
-    }
-}
+    }}

@@ -24,6 +24,15 @@
     </fragment>
 
     <fragment
+        android:id="@+id/videoEditFragment"
+        android:name="com.example.blurshieldapp.ui.video.VideoEditFragment"
+        android:label="Edit Video">
+        <argument
+            android:name="videoUri"
+            app:argType="string" />
+    </fragment>
+
+    <fragment
         android:id="@+id/exportFragment"
         android:name="com.example.blurshieldapp.ui.export.ExportFragment"
         android:label="Export"

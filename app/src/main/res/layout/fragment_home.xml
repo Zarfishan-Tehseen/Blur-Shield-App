@@ -108,22 +108,23 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:paddingTop="16dp"
-                    android:paddingBottom="16dp">
-
+                    android:paddingBottom="16dp"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp">
                     <TextView
-                        android:id="@+id/tv_face_count"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="12dp"
-                        android:textSize="14sp"
-                        android:textColor="?attr/colorPrimary"
-                        android:visibility="gone" />
+                    android:id="@+id/tv_face_count"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:textSize="14sp"
+                    android:textColor="?attr/colorPrimary"
+                    android:visibility="gone" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:weightSum="2">
+                        android:weightSum="3">
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/btn_pick_image"
@@ -135,11 +136,20 @@
                             android:text="Pick Image" />
 
                         <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_pick_video"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="4dp"
+                            android:text="Pick Video"
+                            app:icon="@drawable/ic_video" />
+
+                        <com.google.android.material.button.MaterialButton
                             android:id="@+id/btn_detect"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:layout_marginStart="4dp"
                             android:text="Detect Faces"
                             android:enabled="false" />
                     </LinearLayout>
@@ -148,12 +158,11 @@
                         android:id="@+id/btn_proceed"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
+                        android:layout_marginTop="12dp"
                         android:text="Edit Faces →"
                         android:visibility="gone" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-
             <com.google.android.material.progressindicator.CircularProgressIndicator
                 android:id="@+id/progress"
                 android:layout_width="wrap_content"
