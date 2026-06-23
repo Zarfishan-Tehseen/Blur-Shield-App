@@ -1,367 +1,397 @@
 package com.example.blurshieldapp.utils
 
-import android.annotation.SuppressLint
-import android.content.ContentValues
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.RectF
+import android.graphics.*
 import android.media.*
 import android.net.Uri
-import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
-import android.util.Log
-import com.example.blurshieldapp.ui.video.VideoEditUiState
+import com.example.blurshieldapp.ui.video.VideoEffect
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.face.Face
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetectorOptions
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
 
-private const val TAG = "VideoProcessor"
-private const val TIMEOUT_US = 10_000L
-private const val OUTPUT_MIME = MediaFormat.MIMETYPE_VIDEO_AVC  // H.264
-private const val OUTPUT_BIT_RATE = 8_000_000                  // 8 Mbps
-private const val OUTPUT_I_FRAME_INTERVAL = 1                   // keyframe every 1 sec
+class VideoProcessor(private val context: Context) {
 
-object VideoProcessor {
+    // Preset emojis list (4 built-in emojis)
+    val availableEmojis = listOf("😊", "😎", "🐱", "❤️")
     suspend fun processVideo(
-        context: Context,
-        state: VideoEditUiState,
-        getInterpolatedBoxes: (frameTimestampMs: Long) -> List<RectF>,
-        onProgress: (Float) -> Unit
-    ): String? = withContext(Dispatchers.IO) {
-
-        val inputUri = Uri.parse(state.videoUri ?: return@withContext null)
-
-        // ── Step 1: gather video/audio metadata ────────────────────────────────────
+        sourceUri: Uri,
+        outputFile: File,
+        effect: VideoEffect,
+        emojiChar: String? = null,
+        onProgress: (Int) -> Unit
+    ) = withContext(Dispatchers.Default) {
         val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, sourceUri)
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Unable to read source video metadata: ${e.localizedMessage}")
+        }
+
+        // 1. Verify Video Duration (Limit to 30 seconds)
+        val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+        val durationMs = durationStr?.toLongOrNull() ?: 0L
+        if (durationMs > 30_000L) {
+            retriever.release()
+            throw IllegalArgumentException("Video exceeds the 30-second prototype limit (${durationMs / 1000}s).")
+        }
+
+        val widthStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+        val heightStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+        val rotationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+
+        val srcWidth = widthStr?.toIntOrNull() ?: 640
+        val srcHeight = heightStr?.toIntOrNull() ?: 480
+        val rotation = rotationStr?.toIntOrNull() ?: 0
+
+        // Determine output dimensions, swapping width/height if rotated 90 or 270 degrees
+        val isRotated = rotation == 90 || rotation == 270
+        val originalWidth = if (isRotated) srcHeight else srcWidth
+        val originalHeight = if (isRotated) srcWidth else srcHeight
+
+        // Scale down video to max 640p for processing performance
+        val maxDimension = 640
+        val scale = Math.min(1.0f, maxDimension.toFloat() / Math.max(originalWidth, originalHeight))
+        val targetWidth = ((originalWidth * scale).toInt() / 2) * 2 // Must be even for encoder
+        val targetHeight = ((originalHeight * scale).toInt() / 2) * 2
+
+        // Setup ML Kit Face Detector
+        val detectorOptions = FaceDetectorOptions.Builder()
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
+            .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+            .build()
+        val faceDetector = FaceDetection.getClient(detectorOptions)
+
+        // Setup MediaCodec Encoder (H.264 / AVC)
+        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, targetWidth, targetHeight)
+        format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
+        format.setInteger(MediaFormat.KEY_BIT_RATE, 1_500_000) // 1.5 Mbps
+        format.setInteger(MediaFormat.KEY_FRAME_RATE, 15) // Fixed 15 FPS for processing speed
+        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1) // 1s sync keyframes
+
+        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+        encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        encoder.start()
+
+        // Setup MediaMuxer
+        val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        var videoTrackIndex = -1
+        var audioTrackIndex = -1
+        var isMuxerStarted = false
+
+        // Setup MediaExtractor for Audio tracking
         val audioExtractor = MediaExtractor()
         var hasAudio = false
-        var inputAudioTrackIndex = -1
-        var audioFormat: MediaFormat? = null
-
         try {
-            retriever.setDataSource(context, inputUri)
-
-            // Set up extractor to look for an audio track
-            audioExtractor.setDataSource(context, inputUri, null)
+            audioExtractor.setDataSource(context, sourceUri, null)
             for (i in 0 until audioExtractor.trackCount) {
-                val format = audioExtractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                val trackFormat = audioExtractor.getTrackFormat(i)
+                val mime = trackFormat.getString(MediaFormat.KEY_MIME) ?: ""
                 if (mime.startsWith("audio/")) {
-                    inputAudioTrackIndex = i
-                    audioFormat = format
-                    hasAudio = true
                     audioExtractor.selectTrack(i)
+                    audioTrackIndex = muxer.addTrack(trackFormat)
+                    hasAudio = true
                     break
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to open video or extract audio: ${e.message}")
-            audioExtractor.release()
-            return@withContext null
+            // No audio or error reading audio - proceed video only
         }
 
-        val durationUs = (state.durationMs * 1000L)
-        val videoWidth = state.videoWidth.takeIf { it > 0 }
-            ?: retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
-                ?.toInt() ?: 1280
-        val videoHeight = state.videoHeight.takeIf { it > 0 }
-            ?: retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
-                ?.toInt() ?: 720
-        val frameRateInt = state.frameRate.toInt().takeIf { it > 0 } ?: 30
+        // Estimation of frames
+        val fps = 15
+        val frameDurationUs = 1_000_000L / fps
+        val totalFrames = ((durationMs / 1000f) * fps).toInt().coerceAtLeast(1)
 
-        // ── Step 2: prepare output file ──────────────────────────────────────
-        val outputFile = createOutputFile(context) ?: run {
-            Log.e(TAG, "Failed to create output file")
-            retriever.release()
-            audioExtractor.release()
-            return@withContext null
-        }
-
-        // ── Step 3: set up encoder + muxer ───────────────────────────────────
-        val encoderFormat = MediaFormat.createVideoFormat(
-            OUTPUT_MIME, videoWidth, videoHeight
-        ).apply {
-            setInteger(MediaFormat.KEY_COLOR_FORMAT,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, OUTPUT_BIT_RATE)
-            setInteger(MediaFormat.KEY_FRAME_RATE, frameRateInt)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, OUTPUT_I_FRAME_INTERVAL)
-        }
-
-        val encoder = MediaCodec.createEncoderByType(OUTPUT_MIME)
-        encoder.configure(encoderFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        val inputSurface = encoder.createInputSurface()
-        encoder.start()
-
-        val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        var muxerTrackIndex = -1
-        var muxerAudioTrackIndex = -1
-        var muxerStarted = false
-
-        if (hasAudio && audioFormat != null) {
-            muxerAudioTrackIndex = muxer.addTrack(audioFormat)
-        }
-
-        // ── Step 4: frame-by-frame processing loop ───────────────────────────
-        val frameIntervalUs = 1_000_000L / frameRateInt
-        var currentTimeUs = 0L
+        val bufferInfo = MediaCodec.BufferInfo()
         var frameIndex = 0
-        val totalFrames = (durationUs / frameIntervalUs).toInt().coerceAtLeast(1)
+        var isEncoderEOS = false
 
         try {
-            while (currentTimeUs <= durationUs && isActive) {
+            while (frameIndex < totalFrames || !isEncoderEOS) {
+                // Feed encoder input buffers while we have frames left
+                if (frameIndex < totalFrames) {
+                    val timeUs = frameIndex * frameDurationUs
+                    // Extract frame bitmap
+                    val sourceBitmap = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    if (sourceBitmap != null) {
+                        // 1. Resize and Rotate Frame to Target Dimensions
+                        val processedBitmap = resizeAndOrientBitmap(sourceBitmap, targetWidth, targetHeight, rotation)
+                        val canvas = Canvas(processedBitmap)
 
-                // Extract frame at this timestamp
-                val rawFrame = retriever.getFrameAtTime(
-                    currentTimeUs,
-                    MediaMetadataRetriever.OPTION_CLOSEST
-                )
+                        // 2. Perform Face Detection if effect is active
+                        if (effect != VideoEffect.NONE) {
+                            val inputImage = InputImage.fromBitmap(processedBitmap, 0)
+                            try {
+                                val faces = Tasks.await(faceDetector.process(inputImage))
+                                for (face in faces) {
+                                    applyEffectToFace(canvas, face.boundingBox, processedBitmap, effect, emojiChar)
+                                }
+                            } catch (e: Exception) {
+                                // Fallback/Skip face detection errors for this frame
+                            }
+                        }
 
-                if (rawFrame != null) {
-                    // Apply effects to this frame
-                    val processedFrame = applyEffectsToFrame(
-                        context = context,
-                        frame = rawFrame,
-                        timestampMs = currentTimeUs / 1000,
-                        state = state,
-                        getInterpolatedBoxes = getInterpolatedBoxes
-                    )
+                        // 3. Convert Bitmap to NV12 (YUV420SP)
+                        val yuvData = convertBitmapToNV12(processedBitmap)
 
-                    val canvas = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        inputSurface.lockHardwareCanvas()
+                        // Feed to Encoder
+                        val inputBufferIndex = encoder.dequeueInputBuffer(10000)
+                        if (inputBufferIndex >= 0) {
+                            val inputBuffer = encoder.getInputBuffer(inputBufferIndex)
+                            inputBuffer?.clear()
+                            inputBuffer?.put(yuvData)
+                            encoder.queueInputBuffer(
+                                inputBufferIndex,
+                                0,
+                                yuvData.size,
+                                timeUs,
+                                if (frameIndex == totalFrames - 1) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0
+                            )
+                            frameIndex++
+                            val progressPercent = ((frameIndex.toFloat() / totalFrames) * 90).toInt() // 90% is video encoding
+                            onProgress(progressPercent)
+                        }
                     } else {
-                        inputSurface.lockCanvas(null)
+                        // End of stream if retriever fails to get more frames
+                        val inputBufferIndex = encoder.dequeueInputBuffer(10000)
+                        if (inputBufferIndex >= 0) {
+                            encoder.queueInputBuffer(
+                                inputBufferIndex,
+                                0,
+                                0,
+                                frameIndex * frameDurationUs,
+                                MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                            )
+                            frameIndex = totalFrames // Exit loop condition
+                        }
                     }
-
-                    canvas.drawBitmap(processedFrame, 0f, 0f, null)
-                    inputSurface.unlockCanvasAndPost(canvas)
-
-                    rawFrame.recycle()
-                    if (processedFrame !== rawFrame) processedFrame.recycle()
                 }
 
-                // Drain encoder output into muxer (Fixed parameters to match the definition)
-                drainEncoder(
-                    encoder = encoder,
-                    muxer = muxer,
-                    presentationTimeUs = currentTimeUs,
-                    muxerIndex = { muxerTrackIndex },
-                    setMuxerIndex = { index -> muxerTrackIndex = index },
-                    muxerStarted = { muxerStarted },
-                    setMuxerStarted = { muxerStarted = true },
-                    endOfStream = false
-                )
+                // Dequeue Encoder Output Buffers and Write to Muxer
+                val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, 10000)
+                if (outputBufferIndex >= 0) {
+                    val encodedData = encoder.getOutputBuffer(outputBufferIndex)
+                    if (encodedData != null) {
+                        if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
+                            // Codec config data (SPS/PPS), not video content
+                            bufferInfo.size = 0
+                        }
 
-                currentTimeUs += frameIntervalUs
-                frameIndex++
-                onProgress((frameIndex.toFloat() / totalFrames) * 0.85f)            }
+                        if (bufferInfo.size > 0) {
+                            if (!isMuxerStarted) {
+                                val newFormat = encoder.outputFormat
+                                videoTrackIndex = muxer.addTrack(newFormat)
+                                muxer.start()
+                                isMuxerStarted = true
+                            }
+                            encodedData.position(bufferInfo.offset)
+                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                            muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                        }
 
-            // Signal end of stream and drain remaining encoded frames
-            drainEncoder(
-                encoder = encoder,
-                muxer = muxer,
-                presentationTimeUs = currentTimeUs,
-                muxerIndex = { muxerTrackIndex },
-                setMuxerIndex = { index -> muxerTrackIndex = index },
-                muxerStarted = { muxerStarted },
-                setMuxerStarted = { muxerStarted = true },
-                endOfStream = true
-            )
-            if (hasAudio && muxerStarted) {
-                copyAudioTrack(
-                    extractor = audioExtractor,
-                    muxer = muxer,
-                    muxerAudioTrackIndex = muxerAudioTrackIndex,
-                    durationUs = durationUs
-                )
+                        encoder.releaseOutputBuffer(outputBufferIndex, false)
+
+                        if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                            isEncoderEOS = true
+                        }
+                    }
+                } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    if (!isMuxerStarted) {
+                        val newFormat = encoder.outputFormat
+                        videoTrackIndex = muxer.addTrack(newFormat)
+                        muxer.start()
+                        isMuxerStarted = true
+                    }
+                }
             }
 
-            onProgress(1.0f)
+            // 4. Mux Audio Track (Synchronously copying audio packet-by-packet)
+            if (hasAudio && isMuxerStarted) {
+                val audioBuffer = ByteBuffer.allocate(1024 * 256)
+                val audioBufferInfo = MediaCodec.BufferInfo()
+                audioExtractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
 
-        } catch (e: Exception) {
-            Log.e(TAG, "Processing error: ${e.message}")
-            encoder.release()
-            inputSurface.release()
-            muxer.release()
-            retriever.release()
-            audioExtractor.release()
-            outputFile.delete()
-            return@withContext null
-        }
-
-        // ── Step 5: finalize ─────────────────────────────────────────────────
-        encoder.stop()
-        encoder.release()
-        inputSurface.release()
-        if (muxerStarted) muxer.stop()
-        muxer.release()
-        retriever.release()
-        audioExtractor.release()
-
-        // ── Step 6: save to gallery ──────────────────────────────────────────
-        return@withContext saveVideoToGallery(context, outputFile)
-    }
-
-    // ── Effect application ────────────────────────────────────────────────────
-
-    private fun applyEffectsToFrame(
-        context: Context,
-        frame: Bitmap,
-        timestampMs: Long,
-        state: VideoEditUiState,
-        getInterpolatedBoxes: (Long) -> List<RectF>
-    ): Bitmap {
-        if (state.selectedFaces.isEmpty()) return frame
-
-        val boxes = getInterpolatedBoxes(timestampMs)
-        if (boxes.isEmpty()) return frame
-
-        return ImageProcessor.applyEffect(
-            context = context,
-            original = frame,
-            boxes = boxes,
-            selectedIndices = state.selectedFaces,
-            effect = state.effect,
-            intensity = state.intensity,
-            emoji = state.selectedEmoji
-        )
-    }
-
-    // ── Encoder drain helper ──────────────────────────────────────────────────
-
-    private fun drainEncoder(
-        encoder: MediaCodec,
-        muxer: MediaMuxer,
-        presentationTimeUs: Long,
-        muxerIndex: () -> Int,
-        setMuxerIndex: (Int) -> Unit,
-        muxerStarted: () -> Boolean,
-        setMuxerStarted: () -> Unit,
-        endOfStream: Boolean
-    ) {
-        if (endOfStream) {
-            encoder.signalEndOfInputStream()
-        }
-
-        val bufferInfo = MediaCodec.BufferInfo()
-        while (true) {
-            val outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_US)
-
-            when {
-                outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                    if (!endOfStream) break
-                }
-                outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    val newFormat = encoder.outputFormat
-                    val trackIndex = muxer.addTrack(newFormat)
-                    setMuxerIndex(trackIndex) // Fixed: changed from setMuxerTrackIndex
-                    muxer.start()
-                    setMuxerStarted()
-                }
-                outputBufferIndex >= 0 -> {
-                    val encodedData: ByteBuffer = encoder.getOutputBuffer(outputBufferIndex)
-                        ?: continue
-
-                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
-                        bufferInfo.size = 0
-                    }
-
-                    if (bufferInfo.size > 0 && muxerStarted()) {
-                        bufferInfo.presentationTimeUs = presentationTimeUs
-                        muxer.writeSampleData(muxerIndex(), encodedData, bufferInfo) // Fixed: changed from muxerTrackIndex()
-                    }
-
-                    encoder.releaseOutputBuffer(outputBufferIndex, false)
-
-                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                while (true) {
+                    audioBufferInfo.offset = 0
+                    val sampleSize = audioExtractor.readSampleData(audioBuffer, 0)
+                    if (sampleSize < 0) {
                         break
                     }
+                    audioBufferInfo.size = sampleSize
+                    audioBufferInfo.presentationTimeUs = audioExtractor.sampleTime
+                    audioBufferInfo.flags = audioExtractor.sampleFlags
+
+                    // Clamp to original 30-sec limit to stay clean
+                    if (audioBufferInfo.presentationTimeUs > durationMs * 1000) {
+                        break
+                    }
+
+                    muxer.writeSampleData(audioTrackIndex, audioBuffer, audioBufferInfo)
+                    audioExtractor.advance()
                 }
+            }
+
+            onProgress(100)
+
+        } finally {
+            // Clean up resources
+            try {
+                faceDetector.close()
+                encoder.stop()
+                encoder.release()
+                if (isMuxerStarted) {
+                    muxer.stop()
+                }
+                muxer.release()
+                audioExtractor.release()
+                retriever.release()
+            } catch (e: Exception) {
+                // Ignore final release cleanup crashes
             }
         }
     }
 
-    // ── Output file creation ──────────────────────────────────────────────────
+    private fun resizeAndOrientBitmap(src: Bitmap, targetWidth: Int, targetHeight: Int, rotation: Int): Bitmap {
+        val dest = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(dest)
+        val matrix = Matrix()
 
-    @SuppressLint("WrongConstant")
-    private fun copyAudioTrack(
-        extractor: MediaExtractor,
-        muxer: MediaMuxer,
-        muxerAudioTrackIndex: Int,
-        durationUs: Long
+        // Apply scaling
+        val scaleX = targetWidth.toFloat() / src.width
+        val scaleY = targetHeight.toFloat() / src.height
+        matrix.postScale(scaleX, scaleY)
+
+        // Apply rotation around pivot
+        if (rotation != 0) {
+            matrix.postRotate(rotation.toFloat(), targetWidth / 2f, targetHeight / 2f)
+        }
+
+        canvas.drawBitmap(src, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
+        src.recycle()
+        return dest
+    }
+
+    private fun applyEffectToFace(
+        canvas: Canvas,
+        rect: Rect,
+        bitmap: Bitmap,
+        effect: VideoEffect,
+        emojiChar: String?
     ) {
-        val maxBufferSize = 256 * 1024
-        val buffer = ByteBuffer.allocateDirect(maxBufferSize)
-        val bufferInfo = MediaCodec.BufferInfo()
+        val left = rect.left.coerceIn(0, bitmap.width)
+        val top = rect.top.coerceIn(0, bitmap.height)
+        val right = rect.right.coerceIn(0, bitmap.width)
+        val bottom = rect.bottom.coerceIn(0, bitmap.height)
+        val w = right - left
+        val h = bottom - top
+        if (w <= 0 || h <= 0) return
 
-        extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-
-        while (true) {
-            bufferInfo.offset = 0
-            bufferInfo.size = extractor.readSampleData(buffer, 0)
-
-            if (bufferInfo.size < 0) {
-                break // No more audio packets left
-            }
-
-            bufferInfo.presentationTimeUs = extractor.sampleTime
-            if (bufferInfo.presentationTimeUs > durationUs) {
-                break // Stop copying if we go past the edited video duration limits
-            }
-
-            bufferInfo.flags = extractor.sampleFlags
-            muxer.writeSampleData(muxerAudioTrackIndex, buffer, bufferInfo)
-            extractor.advance()
-        }
-    }
-    private fun createOutputFile(context: Context): File? {
-        return try {
-            val outputDir = context.cacheDir
-            File(outputDir, "processed_video_${System.currentTimeMillis()}.mp4")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to create output file: ${e.message}")
-            null
-        }
-    }
-
-    // ── Save to gallery ───────────────────────────────────────────────────────
-
-    private fun saveVideoToGallery(context: Context, file: File): String? {
-        return try {
-            val filename = "BlurShield_${System.currentTimeMillis()}.mp4"
-            val values = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, filename)
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES)
-                    put(MediaStore.Video.Media.IS_PENDING, 1)
+        when (effect) {
+            VideoEffect.BLUR -> {
+                try {
+                    // Extract face bitmap region
+                    val face = Bitmap.createBitmap(bitmap, left, top, w, h)
+                    // Scale down to blur
+                    val scaleFactor = 8
+                    val small = Bitmap.createScaledBitmap(face, Math.max(1, w / scaleFactor), Math.max(1, h / scaleFactor), true)
+                    // Scale up back
+                    val blurred = Bitmap.createScaledBitmap(small, w, h, true)
+                    canvas.drawBitmap(blurred, left.toFloat(), top.toFloat(), null)
+                    face.recycle()
+                    small.recycle()
+                    blurred.recycle()
+                } catch (e: Exception) {
+                    // Fallback to solid blackout on unexpected OOM
+                    applyBlackout(canvas, left, top, right, bottom)
                 }
             }
-
-            val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
-                ?: return null
-
-            resolver.openOutputStream(uri)?.use { out ->
-                file.inputStream().use { it.copyTo(out) }
+            VideoEffect.PIXELATE -> {
+                try {
+                    val face = Bitmap.createBitmap(bitmap, left, top, w, h)
+                    // Scale down deeply (e.g. 16px dimension)
+                    val pixelSize = 16
+                    val small = Bitmap.createScaledBitmap(face, Math.max(1, w / pixelSize), Math.max(1, h / pixelSize), false)
+                    // Scale back up with filtering disabled
+                    val paint = Paint().apply { isFilterBitmap = false }
+                    canvas.drawBitmap(small, null, RectF(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat()), paint)
+                    face.recycle()
+                    small.recycle()
+                } catch (e: Exception) {
+                    applyBlackout(canvas, left, top, right, bottom)
+                }
             }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.clear()
-                values.put(MediaStore.Video.Media.IS_PENDING, 0)
-                resolver.update(uri, values, null, null)
+            VideoEffect.BLACKOUT -> {
+                applyBlackout(canvas, left, top, right, bottom)
             }
-
-            file.delete()
-            uri.toString()
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save to gallery: ${e.message}")
-            null
+            VideoEffect.EMOJI -> {
+                val selectedEmoji = emojiChar ?: "😊"
+                val paint = Paint().apply {
+                    textSize = h * 0.85f // Size proportional to face height
+                    textAlign = Paint.Align.CENTER
+                    isAntiAlias = true
+                }
+                val x = left + w / 2f
+                val y = (top + h / 2f) - ((paint.descent() + paint.ascent()) / 2f)
+                canvas.drawText(selectedEmoji, x, y, paint)
+            }
+            VideoEffect.NONE -> { /* No-op */ }
         }
+    }
+
+    private fun applyBlackout(canvas: Canvas, left: Int, top: Int, right: Int, bottom: Int) {
+        val paint = Paint().apply {
+            color = Color.BLACK
+            style = Paint.Style.FILL
+        }
+        canvas.drawRect(left.toFloat(), top.toFloat(), right.toFloat(), bottom.toFloat(), paint)
+    }
+
+    /**
+     * Converts a standard ARGB Bitmap into YUV420 Semi-Planar (NV12 format) byte array.
+     */
+    private fun convertBitmapToNV12(bitmap: Bitmap): ByteArray {
+        val w = bitmap.width
+        val h = bitmap.height
+        val size = w * h
+        val nv12 = ByteArray(size + size / 2)
+        val argb = IntArray(size)
+        bitmap.getPixels(argb, 0, w, 0, 0, w, h)
+
+        var yIndex = 0
+        var uvIndex = size
+
+        for (j in 0 until h) {
+            for (i in 0 until w) {
+                val pixel = argb[j * w + i]
+                val r = (pixel shr 16) and 0xFF
+                val g = (pixel shr 8) and 0xFF
+                val b = pixel and 0xFF
+
+                // Fast RGB to YUV NV12 color matrix coefficients
+                var yVal = (0.257f * r + 0.504f * g + 0.098f * b + 16).toInt()
+                var uVal = (-0.148f * r - 0.291f * g + 0.439f * b + 128).toInt()
+                var vVal = (0.439f * r - 0.368f * g - 0.071f * b + 128).toInt()
+
+                yVal = yVal.coerceIn(0, 255)
+                uVal = uVal.coerceIn(0, 255)
+                vVal = vVal.coerceIn(0, 255)
+
+                nv12[yIndex++] = yVal.toByte()
+
+                // NV12 format: Y plane followed by interleaved U and V bytes for 2x2 blocks
+                if (j % 2 == 0 && i % 2 == 0) {
+                    nv12[uvIndex++] = uVal.toByte()
+                    nv12[uvIndex++] = vVal.toByte()
+                }
+            }
+        }
+        return nv12
     }
 }

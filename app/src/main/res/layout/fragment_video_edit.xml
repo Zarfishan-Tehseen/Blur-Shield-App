@@ -1,405 +1,302 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
+<androidx.core.widget.NestedScrollView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="?attr/colorSurface">
+    android:fillViewport="true"
+    android:background="#121214">
 
-    <!-- Toolbar fixed at top, never scrolls -->
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbar"
-        android:layout_width="0dp"
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:elevation="4dp"
-        android:translationZ="4dp"
-        app:title="Edit Video"
-        app:navigationIcon="?attr/homeAsUpIndicator"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        tools:context=".VideoEditFragment">
 
-    <!-- Everything below toolbar scrolls -->
-    <androidx.core.widget.NestedScrollView
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:fillViewport="true"
-        app:layout_constraintTop_toBottomOf="@id/toolbar"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <LinearLayout
+        <!-- Header Toolbar -->
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/layoutHeader"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:layout_height="56dp"
+            android:background="#1A1A1E"
+            android:paddingHorizontal="16dp"
+            app:layout_constraintTop_toTopOf="parent">
 
-            <!-- Preview frame canvas with minimum height -->
+            <ImageButton
+                android:id="@+id/btnBack"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Back"
+                android:src="@android:drawable/ic_menu_revert"
+                app:tint="#FFFFFF"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Video Editor"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+
+        <!-- Video Workspace Card Container -->
+        <androidx.cardview.widget.CardView
+            android:id="@+id/cardVideoContainer"
+            android:layout_width="match_parent"
+            android:layout_height="340dp"
+            android:layout_margin="16dp"
+            app:cardBackgroundColor="#000000"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="8dp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@+id/layoutHeader">
+
             <FrameLayout
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                android:minHeight="260dp"
-                android:background="@color/black">
+                android:layout_height="match_parent">
 
-                <com.example.blurshieldapp.view.PhotoEditCanvasView
-                    android:id="@+id/video_preview_canvas"
+                <!-- TextureView for Media Player Rendering -->
+                <TextureView
+                    android:id="@+id/videoTextureView"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent" />
 
-<!--                 loading -->
-                <com.google.android.material.progressindicator.CircularProgressIndicator
-                    android:id="@+id/progress_detection"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/tv_detection_status"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="bottom|center_horizontal"
-                    android:layout_marginBottom="8dp"
-                    android:textColor="@color/white"
-                    android:textSize="12sp"
-                    android:background="#88000000"
-                    android:paddingHorizontal="8dp"
-                    android:paddingVertical="4dp"
-                    android:visibility="gone" />
+                <!-- Transparent Overlay view for real-time Face overlays -->
+                <ImageView
+                    android:id="@+id/overlayView"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="fitXY" />
 
             </FrameLayout>
+        </androidx.cardview.widget.CardView>
 
-            <com.google.android.material.card.MaterialCardView
+        <!-- Control Panel -->
+        <LinearLayout
+            android:id="@+id/layoutControls"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#1A1A1E"
+            android:elevation="12dp"
+            android:orientation="vertical"
+            android:padding="16dp"
+            app:layout_constraintTop_toBottomOf="@+id/cardVideoContainer"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintVertical_bias="1.0">
+
+            <!-- Emoji Selector Panel (Visible only when EMOJI effect is chosen) -->
+            <HorizontalScrollView
+                android:id="@+id/scrollEmojiPanel"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                app:cardElevation="4dp"
-                app:cardCornerRadius="0dp"
-                app:cardBackgroundColor="#FAF6FC">
+                android:layout_marginBottom="12dp"
+                android:scrollbars="none"
+                android:visibility="gone"
+                tools:visibility="visible">
 
                 <LinearLayout
-                    android:layout_width="match_parent"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="8dp">
+                    android:gravity="center"
+                    android:orientation="horizontal">
 
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-
-                        <com.google.android.material.button.MaterialButton
-                            android:id="@+id/btn_play_pause"
-                            android:layout_width="48dp"
-                            android:layout_height="48dp"
-                            android:layout_marginEnd="8dp"
-                            android:padding="0dp"
-                            app:iconPadding="0dp"
-                            app:iconGravity="textStart"
-                            app:icon="@drawable/ic_play"
-                            style="@style/Widget.MaterialComponents.Button.Icon" />
-                        <TextView
-                            android:id="@+id/tv_current_time"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="0:00"
-                            android:textSize="12sp"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
-
-                        <com.google.android.material.slider.Slider
-                            android:id="@+id/slider_timeline"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginHorizontal="8dp"
-                            android:valueFrom="0"
-                            android:valueTo="100"
-                            android:value="0" />
-
-                        <TextView
-                            android:id="@+id/tv_total_time"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="0:00"
-                            android:textSize="12sp"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
-
-                    </LinearLayout>
-
-                    <!-- Detect faces button -->
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_detect_faces"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Detect Faces"
-                        app:icon="@drawable/ic_face_scan" />
-
-                </LinearLayout>
-
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- Controls card -->
-            <com.google.android.material.card.MaterialCardView
-                android:id="@+id/controls_card"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                app:cardElevation="12dp"
-                app:cardCornerRadius="5dp"
-                app:cardBackgroundColor="#FAF6FC">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:paddingHorizontal="16dp"
-                    android:paddingVertical="16dp">
-
-                    <!-- Face chips -->
                     <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Select faces"
-                        android:textSize="12sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:layout_marginBottom="8dp" />
-
-                    <HorizontalScrollView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:scrollbars="none">
-
-                        <com.google.android.material.chip.ChipGroup
-                            android:id="@+id/chip_group_faces"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            app:singleSelection="false" />
-
-                    </HorizontalScrollView>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginVertical="12dp"
-                        android:background="?attr/colorOutlineVariant" />
-
-                    <!-- Effect toggle -->
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Effect"
-                        android:textSize="12sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:layout_marginBottom="8dp" />
-
-                    <HorizontalScrollView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:scrollbars="none">
-
-                        <com.google.android.material.button.MaterialButtonToggleGroup
-                            android:id="@+id/toggle_effect"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            app:singleSelection="true"
-                            app:selectionRequired="true">
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btn_blur"
-                                style="@style/Widget.Material3.Button.OutlinedButton"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Blur" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btn_pixelate"
-                                style="@style/Widget.Material3.Button.OutlinedButton"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Pixelate" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btn_blackout"
-                                style="@style/Widget.Material3.Button.OutlinedButton"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Black Out" />
-
-                            <com.google.android.material.button.MaterialButton
-                                android:id="@+id/btn_emoji"
-                                style="@style/Widget.Material3.Button.OutlinedButton"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Emoji" />
-
-                        </com.google.android.material.button.MaterialButtonToggleGroup>
-
-                    </HorizontalScrollView>
-
-                    <!-- Emoji preset row -->
-                    <LinearLayout
-                        android:id="@+id/emoji_preset_row"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
+                        android:id="@+id/emoji1"
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:layout_marginHorizontal="8dp"
+                        android:background="?attr/selectableItemBackground"
                         android:gravity="center"
-                        android:layout_marginTop="12dp"
-                        android:visibility="gone">
+                        android:text="😊"
+                        android:textSize="32sp" />
 
-                        <TextView
-                            android:id="@+id/emoji_1"
-                            android:layout_width="0dp"
-                            android:layout_height="48dp"
-                            android:layout_weight="1"
-                            android:gravity="center"
-                            android:textSize="26sp"
-                            android:text="😀"
-                            android:background="?attr/selectableItemBackgroundBorderless" />
-
-                        <TextView
-                            android:id="@+id/emoji_2"
-                            android:layout_width="0dp"
-                            android:layout_height="48dp"
-                            android:layout_weight="1"
-                            android:gravity="center"
-                            android:textSize="26sp"
-                            android:text="😎"
-                            android:background="?attr/selectableItemBackgroundBorderless" />
-
-                        <TextView
-                            android:id="@+id/emoji_3"
-                            android:layout_width="0dp"
-                            android:layout_height="48dp"
-                            android:layout_weight="1"
-                            android:gravity="center"
-                            android:textSize="26sp"
-                            android:text="🤫"
-                            android:background="?attr/selectableItemBackgroundBorderless" />
-
-                        <TextView
-                            android:id="@+id/emoji_4"
-                            android:layout_width="0dp"
-                            android:layout_height="48dp"
-                            android:layout_weight="1"
-                            android:gravity="center"
-                            android:textSize="26sp"
-                            android:text="💀"
-                            android:background="?attr/selectableItemBackgroundBorderless" />
-
-                    </LinearLayout>
-
-                    <!-- Intensity slider -->
                     <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Intensity"
-                        android:textSize="12sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:layout_marginTop="12dp"
-                        android:layout_marginBottom="4dp" />
+                        android:id="@+id/emoji2"
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:layout_marginHorizontal="8dp"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center"
+                        android:text="😎"
+                        android:textSize="32sp" />
 
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/slider_intensity"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:valueFrom="1"
-                        android:valueTo="25"
-                        android:value="15"
-                        android:stepSize="1" />
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginVertical="12dp"
-                        android:background="?attr/colorOutlineVariant" />
-
-                    <!-- Quality setting -->
                     <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Detection quality"
-                        android:textSize="12sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:layout_marginBottom="4dp" />
+                        android:id="@+id/emoji3"
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:layout_marginHorizontal="8dp"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center"
+                        android:text="🐱"
+                        android:textSize="32sp" />
 
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Fast"
-                            android:textSize="11sp"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
-
-                        <com.google.android.material.slider.Slider
-                            android:id="@+id/slider_quality"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginHorizontal="8dp"
-                            android:valueFrom="0.2"
-                            android:valueTo="1.0"
-                            android:value="1.0"
-                            android:stepSize="0.2" />
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Accurate"
-                            android:textSize="11sp"
-                            android:textColor="?attr/colorOnSurfaceVariant" />
-
-                    </LinearLayout>
-
-                    <!-- Process button -->
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btn_process"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="Process Video"
-                        android:enabled="false" />
-
-                    <!-- Processing progress (hidden until processing starts) -->
-                    <LinearLayout
-                        android:id="@+id/processing_progress_container"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:layout_marginTop="8dp"
-                        android:visibility="gone">
-
-                        <TextView
-                            android:id="@+id/tv_processing_status"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Processing..."
-                            android:textSize="12sp"
-                            android:textColor="?attr/colorOnSurfaceVariant"
-                            android:layout_marginBottom="4dp" />
-
-                        <com.google.android.material.progressindicator.LinearProgressIndicator
-                            android:id="@+id/progress_processing"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:max="100" />
-
-                    </LinearLayout>
+                    <TextView
+                        android:id="@+id/emoji4"
+                        android:layout_width="56dp"
+                        android:layout_height="56dp"
+                        android:layout_marginHorizontal="8dp"
+                        android:background="?attr/selectableItemBackground"
+                        android:gravity="center"
+                        android:text="❤️"
+                        android:textSize="32sp" />
 
                 </LinearLayout>
+            </HorizontalScrollView>
 
-            </com.google.android.material.card.MaterialCardView>
+            <!-- Effects Horizontal Selector -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:text="SELECT EFFECT"
+                android:textColor="#8A8A8F"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <!-- NONE -->
+                    <Button
+                        android:id="@+id/btnEffectNone"
+                        style="?android:attr/buttonStyleSmall"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:backgroundTint="#2C2C30"
+                        android:text="Original"
+                        android:textColor="#FFFFFF" />
+
+                    <!-- BLUR -->
+                    <Button
+                        android:id="@+id/btnEffectBlur"
+                        style="?android:attr/buttonStyleSmall"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:backgroundTint="#2C2C30"
+                        android:text="Blur"
+                        android:textColor="#FFFFFF" />
+
+                    <!-- PIXELATE -->
+                    <Button
+                        android:id="@+id/btnEffectPixelate"
+                        style="?android:attr/buttonStyleSmall"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:backgroundTint="#2C2C30"
+                        android:text="Pixelate"
+                        android:textColor="#FFFFFF" />
+
+                    <!-- BLACKOUT -->
+                    <Button
+                        android:id="@+id/btnEffectBlackout"
+                        style="?android:attr/buttonStyleSmall"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:backgroundTint="#2C2C30"
+                        android:text="Blackout"
+                        android:textColor="#FFFFFF" />
+
+                    <!-- EMOJI -->
+                    <Button
+                        android:id="@+id/btnEffectEmoji"
+                        style="?android:attr/buttonStyleSmall"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:backgroundTint="#2C2C30"
+                        android:text="Emoji"
+                        android:textColor="#FFFFFF" />
+
+                </LinearLayout>
+            </HorizontalScrollView>
+
+            <!-- Save Button -->
+            <Button
+                android:id="@+id/btnExport"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="16dp"
+                android:backgroundTint="#7C4DFF"
+                android:text="Export &amp; Save Video"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                app:cornerRadius="28dp" />
 
         </LinearLayout>
 
-    </androidx.core.widget.NestedScrollView>
+        <!-- Full-screen Loading / Progress overlay -->
+        <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/layoutProgressOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:background="#E6121214"
+            android:elevation="24dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintBottom_toBottomOf="parent"
+            tools:visibility="visible">
 
-</androidx.constraintlayout.widget.ConstraintLayout>
+            <ProgressBar
+                android:id="@+id/progressBar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="200dp"
+                android:layout_height="wrap_content"
+                android:max="100"
+                android:progress="0"
+                android:progressTint="#7C4DFF"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+            <TextView
+                android:id="@+id/txtProgressPercent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="0%"
+                android:textColor="#FFFFFF"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                app:layout_constraintEnd_toEndOf="@+id/progressBar"
+                app:layout_constraintStart_toStartOf="@+id/progressBar"
+                app:layout_constraintTop_toBottomOf="@+id/progressBar" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Processing Video frames with ML Kit..."
+                android:textColor="#8A8A8F"
+                android:textSize="14sp"
+                app:layout_constraintEnd_toEndOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toBottomOf="@+id/txtProgressPercent" />
+
+        </androidx.constraintlayout.widget.ConstraintLayout>
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</androidx.core.widget.NestedScrollView>

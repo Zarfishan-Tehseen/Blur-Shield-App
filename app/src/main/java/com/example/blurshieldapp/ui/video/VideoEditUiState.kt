@@ -1,33 +1,22 @@
 package com.example.blurshieldapp.ui.video
 
-import android.graphics.Bitmap
-import android.graphics.RectF
-import com.example.blurshieldapp.utils.FaceEffect
+import android.net.Uri
 
 data class VideoEditUiState(
-    val videoUri: String? = null,
-    val durationMs: Long = 0L,
-    val frameRate: Float = 30f,
-    val videoWidth: Int = 0,
-    val videoHeight: Int = 0,
-
-    val previewFrameBitmap: Bitmap? = null,
-    val previewPositionMs: Long = 0L,
-
-    val keyframeBoxes: Map<Long, List<RectF>> = emptyMap(),
-
-    val selectedFaces: Set<Int> = emptySet(),
-
-    val effect: FaceEffect = FaceEffect.BLUR,
-    val intensity: Float = 15f,
-    val selectedEmoji: String = "😀",
-
-    val keyframeIntervalSec: Float = 1f,
-
-    val isDetecting: Boolean = false,
+    val videoUri: Uri? = null,
+    val durationMs: Long = 0,
     val isProcessing: Boolean = false,
-    val processingProgress: Float = 0f,
-    val outputUri: String? = null,
+    val progress: Int = 0, // 0 to 100
+    val selectedEffect: VideoEffect = VideoEffect.NONE,
+    val selectedEmoji: String? = null, // Can be "😊", "😎", "🐱", "❤️"
     val error: String? = null,
-    var isPlaying: Boolean = false
+    val exportedVideoUri: Uri? = null
 )
+
+enum class VideoEffect {
+    NONE,
+    BLUR,
+    PIXELATE,
+    BLACKOUT,
+    EMOJI
+}
