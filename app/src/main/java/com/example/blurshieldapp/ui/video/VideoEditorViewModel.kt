@@ -51,6 +51,11 @@ class VideoEditorViewModel : ViewModel() {
 
     private val _selectedFaceIndices = MutableStateFlow<Set<Int>>(emptySet())
     val selectedFaceIndices: StateFlow<Set<Int>> = _selectedFaceIndices
+    private val _intensity = MutableStateFlow(15f)
+    val intensity: StateFlow<Float> = _intensity
+
+    private val _selectedEmoji = MutableStateFlow("😶")
+    val selectedEmoji: StateFlow<String> = _selectedEmoji
 
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
     private val cacheSize = maxMemory / 8  // use 1/8th of available memory
@@ -63,6 +68,9 @@ class VideoEditorViewModel : ViewModel() {
     private var frameIntervalMs = 33L
 
     private var framesOutputDir: String? = null
+
+    private val _isPreviewMode = MutableStateFlow(false)
+    val isPreviewMode: StateFlow<Boolean> = _isPreviewMode
 
     // ─── Preprocessing ────────────────────────────────────────────────────────
 
@@ -142,13 +150,15 @@ class VideoEditorViewModel : ViewModel() {
         windowSize: Int = 20
     ) = withContext(Dispatchers.IO) {
         val framesList = _frames.value
+        val intensity = _intensity.value
+        val emoji = _selectedEmoji.value
         for (i in 0 until windowSize) {
             val targetIndex = startIndex + i
             if (targetIndex >= totalFrames) break  // ← stop at end, don't wrap
             if (frameCache.get(targetIndex) == null) {
                 val frameData = framesList.getOrNull(targetIndex) ?: continue
                 val originalBmp = BitmapFactory.decodeFile(frameData.framePath) ?: continue
-                val processedBmp = applyEffectUseCase.renderFrame(originalBmp, frameData.faces)
+                val processedBmp = applyEffectUseCase.renderFrame(originalBmp, frameData.faces, intensity, emoji)
                 originalBmp.recycle()
                 frameCache.put(targetIndex, processedBmp)
             }
@@ -246,20 +256,22 @@ class VideoEditorViewModel : ViewModel() {
         }
     }
 
-    // ─── Internal bitmap loading ───────────────────────────────────────────────
 
     private suspend fun loadBitmapForFrameDirect(index: Int) = withContext(Dispatchers.IO) {
         val frameData = _frames.value.getOrNull(index) ?: return@withContext
         val path = frameData.framePath ?: return@withContext
         if (path.isBlank()) return@withContext
         val originalBmp = BitmapFactory.decodeFile(path) ?: return@withContext
-        val processedBmp = applyEffectUseCase.renderFrame(originalBmp, frameData.faces)
+        val processedBmp = applyEffectUseCase.renderFrame(
+            originalBmp,
+            frameData.faces,
+            _intensity.value,
+            _selectedEmoji.value)
         originalBmp.recycle()
         frameCache.put(index, processedBmp)
         _currentBitmap.value = processedBmp
     }
 
-    // ─── Face selection ───────────────────────────────────────────────────────
 
     fun toggleFaceSelection(faceIndex: Int) {
         val current = _selectedFaceIndices.value.toMutableSet()
@@ -293,7 +305,6 @@ class VideoEditorViewModel : ViewModel() {
 
         _frames.value = frameList
         frameCache.evictAll()
-        clearSelection()
 
         viewModelScope.launch(Dispatchers.IO) {
             loadBitmapForFrameDirect(_currentFrameIndex.value)
@@ -318,9 +329,31 @@ class VideoEditorViewModel : ViewModel() {
             loadBitmapForFrameDirect(_currentFrameIndex.value)
         }
     }
+    fun togglePreviewMode() {
+        _isPreviewMode.value = !_isPreviewMode.value
+        // Clear selection when entering preview so no stale highlights remain
+        if (_isPreviewMode.value) clearSelection()
+    }
+    fun onIntensityChanged(value: Float) {
+        _intensity.value = value
+        // Invalidate cache so next frame load uses new intensity
+        frameCache.evictAll()
+        viewModelScope.launch(Dispatchers.IO) {
+            loadBitmapForFrameDirect(_currentFrameIndex.value)
+        }
+    }
+
+    fun onEmojiSelected(emoji: String) {
+        _selectedEmoji.value = emoji
+        frameCache.evictAll()
+        viewModelScope.launch(Dispatchers.IO) {
+            loadBitmapForFrameDirect(_currentFrameIndex.value)
+        }
+    }
     fun syncFaceSelection(indices: Set<Int>) {
         _selectedFaceIndices.value = indices
     }
+
     override fun onCleared() {
         super.onCleared()
         playbackJob?.cancel()

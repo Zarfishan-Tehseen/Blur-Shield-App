@@ -293,6 +293,11 @@ class FaceOverlayView @JvmOverloads constructor(
         if (!drawingEnabled) return false
         return findHandleOrBox(x, y) != null
     }
+    fun isPointInsideAnyBox(x: Float, y: Float): Boolean {
+        if (!drawingEnabled) return false
+        return findBoxAtPoint(x, y) >= 0
+    }
+
     fun setFacesFromRects(rects: List<RectF>, bitmapWidth: Int, bitmapHeight: Int) {
         bitmapW = bitmapWidth.toFloat()
         bitmapH = bitmapHeight.toFloat()

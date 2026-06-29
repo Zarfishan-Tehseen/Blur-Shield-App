@@ -13,34 +13,20 @@
         android:orientation="vertical">
 
         <androidx.constraintlayout.widget.ConstraintLayout
+            android:id="@+id/videoContainer"
             android:layout_width="match_parent"
             android:layout_height="450dp"
             android:background="#000">
 
-            <com.example.blurshieldapp.view.VideoCanvasView
-                android:id="@+id/surfaceView"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
+            <com.example.blurshieldapp.view.VideoEditCanvasView
+                android:id="@+id/videoCanvas"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
                 android:background="#000"
-                android:clickable="false"
-                android:focusable="false"
-                android:importantForAccessibility="no"
                 app:layout_constraintTop_toTopOf="parent"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
                 app:layout_constraintEnd_toEndOf="parent"/>
-
-            <com.example.blurshieldapp.view.FaceOverlayView
-                android:id="@+id/faceOverlay"
-                android:layout_width="0dp"
-                android:layout_height="0dp"
-                android:clickable="true"
-                android:focusable="true"
-                android:background="@android:color/transparent"
-                app:layout_constraintTop_toTopOf="@id/surfaceView"
-                app:layout_constraintBottom_toBottomOf="@id/surfaceView"
-                app:layout_constraintStart_toStartOf="@id/surfaceView"
-                app:layout_constraintEnd_toEndOf="@id/surfaceView"/>
 
             <LinearLayout
                 android:id="@+id/preprocessingLayout"
@@ -122,32 +108,132 @@
                     android:layout_height="wrap_content"
                     android:text="Pick Video"/>
             </LinearLayout>
+            <!-- Add this after the horizontal LinearLayout containing btnPlayPause/tvFrameCounter/btnPickVideo -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="end"
+                android:layout_marginTop="8dp">
+
+                <Button
+                    android:id="@+id/btnDoneEdit"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Done"
+                    android:backgroundTint="#4CAF50"/>
+
+                <Button
+                    android:id="@+id/btnResetZoom"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Reset Zoom"
+                    android:layout_marginStart="8dp"/>
+
+            </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/effectsLayout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center"
+                android:orientation="vertical"
                 android:visibility="gone"
                 android:layout_marginTop="8dp">
 
-                <Button android:id="@+id/btnBlur"
-                    android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:text="Blur" android:textSize="12sp"/>
+                <!-- Effect buttons row -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center">
 
-                <Button android:id="@+id/btnPixelate"
-                    android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:text="Pixelate" android:textSize="12sp"/>
+                    <Button android:id="@+id/btnBlur"
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="Blur" android:textSize="12sp"/>
 
-                <Button android:id="@+id/btnBlackout"
-                    android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:text="Blackout" android:textSize="12sp"/>
+                    <Button android:id="@+id/btnPixelate"
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="Pixelate" android:textSize="12sp"/>
 
-                <Button android:id="@+id/btnEmoji"
-                    android:layout_width="0dp" android:layout_height="wrap_content"
-                    android:layout_weight="1" android:text="Emoji" android:textSize="12sp"/>
-            </LinearLayout>
-        </LinearLayout>
+                    <Button android:id="@+id/btnBlackout"
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="Blackout" android:textSize="12sp"/>
+
+                    <Button android:id="@+id/btnEmoji"
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="Emoji" android:textSize="12sp"/>
+
+                </LinearLayout>
+
+                <!-- Emoji picker row — visible only when Emoji effect is active -->
+                <LinearLayout
+                    android:id="@+id/emojiPickerRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:layout_marginTop="8dp"
+                    android:visibility="gone">
+
+                    <TextView android:id="@+id/emojiOpt1"
+                        android:layout_width="0dp" android:layout_height="48dp"
+                        android:layout_weight="1" android:gravity="center"
+                        android:textSize="26sp" android:text="😶"
+                        android:background="?attr/selectableItemBackgroundBorderless"/>
+
+                    <TextView android:id="@+id/emojiOpt2"
+                        android:layout_width="0dp" android:layout_height="48dp"
+                        android:layout_weight="1" android:gravity="center"
+                        android:textSize="26sp" android:text="😀"
+                        android:background="?attr/selectableItemBackgroundBorderless"/>
+
+                    <TextView android:id="@+id/emojiOpt3"
+                        android:layout_width="0dp" android:layout_height="48dp"
+                        android:layout_weight="1" android:gravity="center"
+                        android:textSize="26sp" android:text="😎"
+                        android:background="?attr/selectableItemBackgroundBorderless"/>
+
+                    <TextView android:id="@+id/emojiOpt4"
+                        android:layout_width="0dp" android:layout_height="48dp"
+                        android:layout_weight="1" android:gravity="center"
+                        android:textSize="26sp" android:text="🤫"
+                        android:background="?attr/selectableItemBackgroundBorderless"/>
+
+                    <TextView android:id="@+id/emojiOpt5"
+                        android:layout_width="0dp" android:layout_height="48dp"
+                        android:layout_weight="1" android:gravity="center"
+                        android:textSize="26sp" android:text="💀"
+                        android:background="?attr/selectableItemBackgroundBorderless"/>
+
+                </LinearLayout>
+
+                <!-- Intensity row — hidden when Emoji is active (no intensity for emoji) -->
+                <LinearLayout
+                    android:id="@+id/intensityRow"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="8dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Intensity"
+                        android:textColor="#FFF"
+                        android:textSize="12sp"
+                        android:layout_marginBottom="4dp"/>
+
+                    <SeekBar
+                        android:id="@+id/seekBarIntensity"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="25"
+                        android:progress="15"
+                        android:min="1"/>
+
+                </LinearLayout>
+
+            </LinearLayout>        </LinearLayout>
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

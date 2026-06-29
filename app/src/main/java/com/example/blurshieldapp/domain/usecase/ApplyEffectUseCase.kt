@@ -22,13 +22,18 @@ class ApplyEffectUseCase {
     }
 
     // 2. Refactored to delegate directly to our optimized EffectProcessor
-    fun renderFrame(originalBitmap: Bitmap, faces: List<com.example.blurshieldapp.data.model.FaceData>): Bitmap {
+    fun renderFrame(
+        originalBitmap: Bitmap,
+        faces: List<com.example.blurshieldapp.data.model.FaceData>,
+        intensity: Float = 15f,    // ← add
+        emoji: String = "😶"
+    ): Bitmap {
         // Map our custom FaceData data class into the Pair<RectF, FaceEffect> required by EffectProcessor
         val effectPairs = faces.map { face ->
             Pair(face.boundingBox, face.effect)
         }
 
         // Returns the beautiful modified mutable copy, leaving the original intact
-        return EffectProcessor.applyEffects(originalBitmap, effectPairs)
+        return EffectProcessor.applyEffects(originalBitmap, effectPairs, intensity, emoji)
     }
 }

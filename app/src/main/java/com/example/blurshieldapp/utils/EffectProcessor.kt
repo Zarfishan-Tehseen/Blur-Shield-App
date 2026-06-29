@@ -5,39 +5,26 @@ import com.example.blurshieldapp.data.model.FaceEffect
 import kotlin.math.roundToInt
 
 object EffectProcessor {
-    private val blackoutPaint = Paint().apply {
-        color = Color.BLACK
-        style = Paint.Style.FILL
-    }
-
     private val emojiPaint = Paint().apply {
         textAlign = Paint.Align.CENTER
         isAntiAlias = true
     }
-
-    /**
-     * Applies all effects for the given frame onto a COPY of the bitmap.
-     * Original bitmap is not modified.
-     *
-     * @param source     original frame bitmap
-     * @param faces      list of Pair(boundingBox in bitmap coords, effect to apply)
-     * @return           new bitmap with effects applied
-     */
     fun applyEffects(
         source: Bitmap,
-        faces: List<Pair<RectF, FaceEffect>>
+        faces: List<Pair<RectF, FaceEffect>>,
+        intensity: Float = 15f,
+        emoji: String = "😶"
     ): Bitmap {
-        // Work on a mutable copy so original stays intact
         val result = source.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(result)
 
         faces.forEach { (rect, effect) ->
             when (effect) {
-                FaceEffect.NONE -> { /* nothing */ }
-                FaceEffect.BLUR -> applyBlur(canvas, result, rect)
-                FaceEffect.PIXELATE -> applyPixelate(canvas, result, rect)
-                FaceEffect.BLACKOUT -> applyBlackout(canvas, rect)
-                FaceEffect.EMOJI -> applyEmoji(canvas, rect)
+                FaceEffect.NONE -> { }
+                FaceEffect.BLUR -> applyBlur(canvas, result, rect, intensity)
+                FaceEffect.PIXELATE -> applyPixelate(canvas, result, rect, intensity)
+                FaceEffect.BLACKOUT -> applyBlackout(canvas, rect, intensity)
+                FaceEffect.EMOJI -> applyEmoji(canvas, rect, emoji)
             }
         }
 
@@ -48,13 +35,13 @@ object EffectProcessor {
     // BLUR
     // Crops the face region, applies a stack blur, draws it back
     // -------------------------------------------------------------------------
-    private fun applyBlur(canvas: Canvas, bitmap: Bitmap, rect: RectF) {
+    private fun applyBlur(canvas: Canvas, bitmap: Bitmap, rect: RectF, intensity: Float) {
         val safeRect = clampRect(rect, bitmap.width, bitmap.height) ?: return
 
         val cropW = safeRect.width().toInt()
         val cropH = safeRect.height().toInt()
         if (cropW < 10 || cropH < 10) {
-            applyBlackout(canvas, safeRect)
+            applyBlackout(canvas, safeRect, intensity)
             return
         }
         val faceCrop = Bitmap.createBitmap(
@@ -65,7 +52,7 @@ object EffectProcessor {
             safeRect.height().toInt()
         )
 
-        val safeRadius = minOf(20, cropW / 2, cropH / 2).coerceAtLeast(1)
+        val safeRadius = minOf(intensity.toInt(), cropW / 2, cropH / 2).coerceAtLeast(1)
         val blurred = stackBlur(faceCrop, radius = safeRadius)
         canvas.drawBitmap(blurred, null, safeRect, null)
 
@@ -77,9 +64,9 @@ object EffectProcessor {
     // PIXELATE
     // Downscale to tiny size then upscale back = pixelated look
     // -------------------------------------------------------------------------
-    private fun applyPixelate(canvas: Canvas, bitmap: Bitmap, rect: RectF) {
+    private fun applyPixelate(canvas: Canvas, bitmap: Bitmap, rect: RectF, intensity: Float) {
         val safeRect = clampRect(rect, bitmap.width, bitmap.height) ?: return
-        val blockSize = 15 // pixel block size
+        val blockSize = intensity.toInt().coerceAtLeast(2)
 
         val w = safeRect.width().toInt()
         val h = safeRect.height().toInt()
@@ -100,31 +87,22 @@ object EffectProcessor {
         small.recycle()
         pixelated.recycle()
     }
-
-    // -------------------------------------------------------------------------
-    // BLACKOUT
-    // Just fills the region with solid black
-    // -------------------------------------------------------------------------
-    private fun applyBlackout(canvas: Canvas, rect: RectF) {
-        canvas.drawRect(rect, blackoutPaint)
+    private fun applyBlackout(canvas: Canvas, rect: RectF, intensity: Float) {
+        val alpha = ((intensity / 25f) * 255f).toInt().coerceIn(10, 255)
+        val paint = Paint().apply {
+            color = Color.BLACK
+            style = Paint.Style.FILL
+            this.alpha = alpha
+        }
+        canvas.drawRect(rect, paint)
     }
 
-    // -------------------------------------------------------------------------
-    // EMOJI
-    // Draws a 😶 emoji centered on the face region
-    // -------------------------------------------------------------------------
-    private fun applyEmoji(canvas: Canvas, rect: RectF) {
+    private fun applyEmoji(canvas: Canvas, rect: RectF, emoji: String) {
         emojiPaint.textSize = minOf(rect.width(), rect.height()) * 0.85f
-        val emoji = "😶"
         val x = rect.centerX()
         val y = rect.centerY() - (emojiPaint.descent() + emojiPaint.ascent()) / 2f
-        canvas.drawText(emoji, x, y, emojiPaint)  // ← reuse, only textSize changes
+        canvas.drawText(emoji, x, y, emojiPaint)
     }
-
-    // -------------------------------------------------------------------------
-    // STACK BLUR (pure Kotlin, no RenderScript needed)
-    // Fast and works on all API levels
-    // -------------------------------------------------------------------------
     private fun stackBlur(bitmap: Bitmap, radius: Int): Bitmap {
         val r = radius.coerceIn(1, 100)
         val w = bitmap.width
