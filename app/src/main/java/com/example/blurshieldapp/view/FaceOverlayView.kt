@@ -175,10 +175,17 @@ class FaceOverlayView @JvmOverloads constructor(
                     activeHandle = hit.second
                     dragStartBitmapPoint = screenPointToBitmap(event.x, event.y)
                     dragStartRect = RectF(boxes[hit.first].rect)
+
+                    // FIX 1: Disallow parent scrollview from stealing this box adjustment
+                    parent?.requestDisallowInterceptTouchEvent(true)
                     return true
                 }
-                // Tap on empty space inside a selected box still handled above;
-                // nothing hit -> let parent handle (pinch/pan)
+
+                // FIX 2: Intercept the touch if the user pressed anywhere inside a green box
+                if (findBoxAtPoint(event.x, event.y) >= 0) {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                    return true
+                }
                 return false
             }
 
@@ -201,9 +208,7 @@ class FaceOverlayView @JvmOverloads constructor(
                         Handle.MOVE -> { newRect.offset(dx, dy) }
                     }
 
-                    // Clamp to bitmap bounds + enforce minimum size
                     clampRect(newRect)
-
                     boxes[idx].rect = newRect
                     onBoxAdjusted?.invoke(idx, newRect)
                     invalidate()
@@ -213,6 +218,9 @@ class FaceOverlayView @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // FIX 3: Release the scrollview so the user can scroll the page normally again
+                parent?.requestDisallowInterceptTouchEvent(false)
+
                 if (activeHandle != null) {
                     activeHandle = null
                     activeBoxIndex = -1
@@ -221,7 +229,8 @@ class FaceOverlayView @JvmOverloads constructor(
                     onBoxAdjustFinished?.invoke()
                     return true
                 }
-                // Plain tap (no drag happened) -> toggle selection
+
+                // Plain tap handling logic
                 val tapped = findBoxAtPoint(event.x, event.y)
                 if (tapped >= 0) {
                     selectFace(tapped, tapped !in selectedFaces)

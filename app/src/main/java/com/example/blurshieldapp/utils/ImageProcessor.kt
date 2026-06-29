@@ -93,11 +93,6 @@ object ImageProcessor {
             paint
         )
     }
-
-    // ────────────────────────────────────────────────────────────────────────────
-    // Brush mask effect  (Blur / Pixelate / Blackout over the painted region)
-    // ────────────────────────────────────────────────────────────────────────────
-
     fun applyBrushMaskEffect(
         context: Context,
         base: Bitmap,
