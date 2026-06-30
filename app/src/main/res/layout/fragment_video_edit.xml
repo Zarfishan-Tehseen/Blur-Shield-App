@@ -80,6 +80,33 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="8dp"/>
+            <LinearLayout
+                android:id="@+id/undoRedoLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="start"
+                android:visibility="gone"
+                android:layout_marginBottom="4dp">
+
+                <Button
+                    android:id="@+id/btnUndo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="↩ Undo"
+                    android:textSize="12sp"
+                    android:enabled="false"/>
+
+                <Button
+                    android:id="@+id/btnRedo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Redo ↪"
+                    android:textSize="12sp"
+                    android:layout_marginStart="8dp"
+                    android:enabled="false"/>
+
+            </LinearLayout>
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -108,7 +135,6 @@
                     android:layout_height="wrap_content"
                     android:text="Pick Video"/>
             </LinearLayout>
-            <!-- Add this after the horizontal LinearLayout containing btnPlayPause/tvFrameCounter/btnPickVideo -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -132,6 +158,37 @@
 
             </LinearLayout>
 
+            <!-- Add this right before the effectsLayout LinearLayout -->
+            <LinearLayout
+                android:id="@+id/chipsRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:layout_marginTop="8dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Select faces"
+                    android:textColor="#FFF"
+                    android:textSize="12sp"
+                    android:layout_marginBottom="6dp"/>
+
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none">
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chipGroupFaces"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:singleSelection="false"/>
+
+                </HorizontalScrollView>
+
+            </LinearLayout>
             <LinearLayout
                 android:id="@+id/effectsLayout"
                 android:layout_width="match_parent"

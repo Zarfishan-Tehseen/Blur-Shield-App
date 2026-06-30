@@ -30,40 +30,43 @@ object EffectProcessor {
 
         return result
     }
-
-    // -------------------------------------------------------------------------
-    // BLUR
-    // Crops the face region, applies a stack blur, draws it back
-    // -------------------------------------------------------------------------
     private fun applyBlur(canvas: Canvas, bitmap: Bitmap, rect: RectF, intensity: Float) {
         val safeRect = clampRect(rect, bitmap.width, bitmap.height) ?: return
-
         val cropW = safeRect.width().toInt()
         val cropH = safeRect.height().toInt()
-        if (cropW < 10 || cropH < 10) {
-            applyBlackout(canvas, safeRect, intensity)
-            return
-        }
+        if (cropW < 10 || cropH < 10) { applyBlackout(canvas, safeRect, intensity); return }
+
         val faceCrop = Bitmap.createBitmap(
-            bitmap,
-            safeRect.left.toInt(),
-            safeRect.top.toInt(),
-            safeRect.width().toInt(),
-            safeRect.height().toInt()
+            bitmap, safeRect.left.toInt(), safeRect.top.toInt(), cropW, cropH
         )
 
-        val safeRadius = minOf(intensity.toInt(), cropW / 2, cropH / 2).coerceAtLeast(1)
-        val blurred = stackBlur(faceCrop, radius = safeRadius)
-        canvas.drawBitmap(blurred, null, safeRect, null)
+        // ── Downscale trick ──────────────────────────────────────────────────
+        // Blur at 1/4 resolution then upscale back.
+        // Reduces pixel operations by 16x with no visible quality loss for faces.
+        val downScale = 4
+        val smallW = (cropW / downScale).coerceAtLeast(4)
+        val smallH = (cropH / downScale).coerceAtLeast(4)
 
+        val smallCrop = Bitmap.createScaledBitmap(faceCrop, smallW, smallH, true)
         faceCrop.recycle()
-        blurred.recycle()
-    }
 
-    // -------------------------------------------------------------------------
-    // PIXELATE
-    // Downscale to tiny size then upscale back = pixelated look
-    // -------------------------------------------------------------------------
+        // Blur radius scales down with the image
+        val safeRadius = minOf(
+            (intensity.toInt() / downScale).coerceAtLeast(1),
+            smallW / 2,
+            smallH / 2
+        ).coerceAtLeast(1)
+
+        val blurred = stackBlur(smallCrop, radius = safeRadius)
+        smallCrop.recycle()
+
+        // Upscale back to original face region — soft edges naturally appear
+        val upscaled = Bitmap.createScaledBitmap(blurred, cropW, cropH, true)
+        blurred.recycle()
+
+        canvas.drawBitmap(upscaled, null, safeRect, null)
+        upscaled.recycle()
+    }
     private fun applyPixelate(canvas: Canvas, bitmap: Bitmap, rect: RectF, intensity: Float) {
         val safeRect = clampRect(rect, bitmap.width, bitmap.height) ?: return
         val blockSize = intensity.toInt().coerceAtLeast(2)

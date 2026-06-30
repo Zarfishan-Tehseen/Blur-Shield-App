@@ -14,6 +14,7 @@ import com.example.blurshieldapp.data.model.FaceEffect
 import com.example.blurshieldapp.data.model.VideoEditorState
 import com.example.blurshieldapp.databinding.FragmentVideoEditBinding
 import kotlinx.coroutines.flow.collectLatest
+import com.google.android.material.chip.Chip
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -24,6 +25,8 @@ class VideoEditFragment : Fragment() {
     private val viewModel: VideoEditorViewModel by viewModels()
     private var isSeeking = false
     private var currentEffect: FaceEffect = FaceEffect.BLUR
+
+    private var lastChipCount = -1
 
     private val videoPicker = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -56,20 +59,9 @@ class VideoEditFragment : Fragment() {
         super.onDestroyView()
         _binding = null
     }
-
-    // ── Canvas setup ───────────────────────────────────────────────────────────
-    // Touch routing, zoom, pan, and overlay sync all happen inside
-    // VideoEditCanvasView — nothing to coordinate here in the fragment.
-
     private fun setupCanvas() {
-        // onTransformUpdated is available for future use (export, minimap, etc.)
-        // Overlay is already updated directly inside VideoEditCanvasView.applyMatrix()
-        // so no action needed here right now.
         binding.videoCanvas.onTransformUpdated = { _ -> }
     }
-
-    // ── Face overlay setup ─────────────────────────────────────────────────────
-
     private fun setupFaceOverlay() {
         binding.videoCanvas.overlayView.onFaceSelectionChanged = { selected ->
             viewModel.syncFaceSelection(selected)
@@ -106,29 +98,40 @@ class VideoEditFragment : Fragment() {
             override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                 if (fromUser) viewModel.seekToFrame(progress)
             }
-            override fun onStartTrackingTouch(seekBar: SeekBar) { isSeeking = true }
-            override fun onStopTrackingTouch(seekBar: SeekBar) { isSeeking = false }
+            override fun onStartTrackingTouch(seekBar: SeekBar) {
+                isSeeking = true
+                viewModel.pause()   // ← pause once when drag starts, not on every tick
+            }
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                isSeeking = false
+                // Optionally resume playback after seek if it was playing before
+                // viewModel.play()
+            }
         })
 
         // Effect buttons — apply effect AND update sub-row visibility
         binding.btnBlur.setOnClickListener {
             viewModel.applyEffectToSelected(FaceEffect.BLUR)
             updateEffectSubRows(FaceEffect.BLUR)
+            highlightActiveEffectButton(FaceEffect.BLUR)
             binding.effectsLayout.visibility = View.VISIBLE  // keep panel open
         }
         binding.btnPixelate.setOnClickListener {
             viewModel.applyEffectToSelected(FaceEffect.PIXELATE)
             updateEffectSubRows(FaceEffect.PIXELATE)
+            highlightActiveEffectButton(FaceEffect.PIXELATE)
             binding.effectsLayout.visibility = View.VISIBLE
         }
         binding.btnBlackout.setOnClickListener {
             viewModel.applyEffectToSelected(FaceEffect.BLACKOUT)
             updateEffectSubRows(FaceEffect.BLACKOUT)
+            highlightActiveEffectButton(FaceEffect.BLACKOUT)
             binding.effectsLayout.visibility = View.VISIBLE
         }
         binding.btnEmoji.setOnClickListener {
             viewModel.applyEffectToSelected(FaceEffect.EMOJI)
             updateEffectSubRows(FaceEffect.EMOJI)
+            highlightActiveEffectButton(FaceEffect.EMOJI)
             binding.effectsLayout.visibility = View.VISIBLE
         }
 
@@ -138,7 +141,9 @@ class VideoEditFragment : Fragment() {
                 if (fromUser) viewModel.onIntensityChanged(progress.toFloat())
             }
             override fun onStartTrackingTouch(seekBar: SeekBar) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar) {
+                viewModel.onIntensityChangeFinished()  // ← push snapshot on release
+            }
         })
 
         // Emoji picker
@@ -156,6 +161,9 @@ class VideoEditFragment : Fragment() {
 
         binding.btnDoneEdit.setOnClickListener { viewModel.togglePreviewMode() }
         binding.btnResetZoom.setOnClickListener { binding.videoCanvas.resetZoom() }
+
+        binding.btnUndo.setOnClickListener { viewModel.undo() }
+        binding.btnRedo.setOnClickListener { viewModel.redo() }
     }
 
     // ── ViewModel observers ────────────────────────────────────────────────────
@@ -201,6 +209,10 @@ class VideoEditFragment : Fragment() {
                     bitmapWidth = bitmap.width,
                     bitmapHeight = bitmap.height
                 )
+                if (frame.faces.size != lastChipCount) {
+                    buildChips(frame.faces.size)
+                }
+                binding.chipsRow.visibility = if (frame.faces.isNotEmpty()) View.VISIBLE else View.GONE
             }
         }
 
@@ -218,7 +230,12 @@ class VideoEditFragment : Fragment() {
             viewModel.isPlaying.collectLatest { playing ->
                 binding.btnPlayPause.text = if (playing) "Pause" else "Play"
                 binding.videoCanvas.overlayView.setDrawingEnabled(!playing)
-                if (playing) binding.effectsLayout.visibility = View.GONE
+                if (playing) {
+                    binding.effectsLayout.visibility = View.GONE
+                    binding.chipsRow.visibility = View.GONE
+                } else if (viewModel.frames.value.getOrNull(viewModel.currentFrameIndex.value)?.faces?.isNotEmpty() == true) {
+                    binding.chipsRow.visibility = View.VISIBLE
+                }
             }
         }
 
@@ -226,27 +243,93 @@ class VideoEditFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewModel.selectedFaceIndices.collectLatest { selected ->
                 binding.videoCanvas.overlayView.syncSelection(selected)
+                syncChips(selected)
             }
         }
 
-        // Preview / Edit mode collector
         viewLifecycleOwner.lifecycleScope.launch {
             viewModel.isPreviewMode.collectLatest { isPreview ->
                 binding.btnDoneEdit.text = if (isPreview) "Edit" else "Done"
                 binding.videoCanvas.overlayView.visibility =
                     if (isPreview) View.GONE else View.VISIBLE
-                if (isPreview) binding.effectsLayout.visibility = View.GONE
+                if (isPreview) {
+                    binding.effectsLayout.visibility = View.GONE
+                    binding.chipsRow.visibility = View.GONE
+                }
+            }
+        }
+        // Undo state — show/hide the whole row based on whether any history exists
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.canUndo.collectLatest { canUndo ->
+                // Show undo/redo row only when there's history
+                binding.undoRedoLayout.visibility =
+                    if (canUndo || viewModel.canRedo.value) View.VISIBLE else View.GONE
+                binding.btnUndo.isEnabled = canUndo
+                binding.btnUndo.alpha = if (canUndo) 1f else 0.4f
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.canRedo.collectLatest { canRedo ->
+                binding.undoRedoLayout.visibility =
+                    if (viewModel.canUndo.value || canRedo) View.VISIBLE else View.GONE
+                binding.btnRedo.isEnabled = canRedo
+                binding.btnRedo.alpha = if (canRedo) 1f else 0.4f
+            }
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.activeEffect.collectLatest { effect ->
+                highlightActiveEffectButton(effect)
+                currentEffect = effect
             }
         }
     }
-
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
     private fun getRealPath(uri: Uri): String? {
         val tempFile = File(requireContext().cacheDir, "input_video_temp.mp4")
         requireContext().contentResolver.openInputStream(uri)?.use { input ->
             tempFile.outputStream().use { input.copyTo(it) }
         }
         return tempFile.absolutePath
+    }
+    private fun highlightActiveEffectButton(effect: FaceEffect) {
+        val activeColor = android.graphics.Color.parseColor("#4CAF50")
+        val inactiveColor = android.graphics.Color.parseColor("#9E9E9E")
+
+        binding.btnBlur.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            if (effect == FaceEffect.BLUR) activeColor else inactiveColor
+        )
+        binding.btnPixelate.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            if (effect == FaceEffect.PIXELATE) activeColor else inactiveColor
+        )
+        binding.btnBlackout.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            if (effect == FaceEffect.BLACKOUT) activeColor else inactiveColor
+        )
+        binding.btnEmoji.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            if (effect == FaceEffect.EMOJI) activeColor else inactiveColor
+        )
+    }
+    private fun buildChips(count: Int) {
+        binding.chipGroupFaces.removeAllViews()
+        repeat(count) { i ->
+            val chip = Chip(requireContext()).apply {
+                text = "Face ${i + 1}"
+                isCheckable = true
+                setOnCheckedChangeListener { _, checked ->
+                    val current = viewModel.selectedFaceIndices.value.toMutableSet()
+                    if (checked) current.add(i) else current.remove(i)
+                    viewModel.syncFaceSelection(current)
+                }
+            }
+            binding.chipGroupFaces.addView(chip)
+        }
+        lastChipCount = count
+    }
+
+    private fun syncChips(selected: Set<Int>) {
+        for (i in 0 until binding.chipGroupFaces.childCount) {
+            val chip = binding.chipGroupFaces.getChildAt(i) as? Chip
+            val shouldBeChecked = i in selected
+            if (chip?.isChecked != shouldBeChecked) chip?.isChecked = shouldBeChecked
+        }
     }
 }
